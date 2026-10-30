@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CS Agent 백오피스</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-name" id="brand-name">CS Agent</span>
+    <span class="brand-sub">백오피스</span>
+  </div>
+  <div class="kpis" id="kpis" aria-label="지표"></div>
+  <div class="topbar-right">
+    <span class="pill" id="agent-pill" title="에이전트 상태"><span class="dot"></span><span id="agent-pill-text">연결 중</span></span>
+    <span class="badges" id="provider-badges"></span>
+    <label class="reviewer">검토자 <input id="reviewer" type="text" placeholder="이름 입력" maxlength="40" autocomplete="off" aria-label="검토자 이름(승인·인수 기록에 남습니다)"></label>
+    <button id="btn-inject" class="btn btn-ghost" type="button">새 문의 주입 <span class="tag tag-test">테스트용</span></button>
+  </div>
+</header>
+
+<div class="banners">
+  <div class="auth-banner" id="auth-banner" role="alert" hidden>인증이 필요합니다 — 프록시를 통해 접속하세요</div>
+  <div class="mail-banner" id="mail-banner" role="status" hidden></div>
+</div>
+
+<main class="layout">
+  <aside class="filters" aria-label="필터">
+    <section>
+      <h2>빠른 보기</h2>
+      <div class="filter-list">
+        <button class="filter-btn" id="quick-pending" type="button">승인 대기만</button>
+      </div>
+    </section>
+    <section>
+      <h2>상태</h2>
+      <div id="state-filters" class="filter-list"></div>
+    </section>
+    <section>
+      <h2>채널</h2>
+      <div id="channel-filters" class="filter-list"></div>
+    </section>
+    <section>
+      <h2>승격 지표 <span class="hint">L0→L1</span></h2>
+      <div id="promotion" class="promotion"></div>
+    </section>
+    <section>
+      <h2>검색</h2>
+      <input id="search" type="search" placeholder="이름 · 이메일 · 제목" aria-label="검색">
+    </section>
+  </aside>
+
+  <section class="list-wrap" aria-label="케이스 목록">
+    <div class="list-head">
+      <span id="list-count">케이스</span>
+      <button id="btn-refresh" class="btn btn-ghost btn-sm" type="button">새로고침</button>
+    </div>
+    <ul id="case-list" class="case-list" role="listbox" aria-label="케이스"></ul>
+  </section>
+
+  <section class="detail" id="detail" aria-label="케이스 상세" aria-live="polite">
+    <div class="empty">케이스를 선택하세요</div>
+  </section>
+</main>
+
+<footer class="live" id="live">
+  <div class="live-head">
+    <button id="live-toggle" class="live-toggle" type="button" aria-expanded="true" aria-controls="live-feed">에이전트 라이브</button>
+    <span class="conn"><span class="dot" id="sse-dot"></span><span id="sse-text">연결 중</span></span>
+    <span class="live-count" id="live-count"></span>
+    <button id="live-clear" class="btn btn-ghost btn-sm" type="button">비우기</button>
+  </div>
+  <ol id="live-feed" class="live-feed" aria-label="에이전트 단계 로그"></ol>
+</footer>
+
+<dialog id="inject-dialog">
+  <form id="inject-form" novalidate>
+    <h3>새 문의 주입 <span class="tag tag-test">테스트용</span></h3>
+    <p class="hint">실제 메일 수신 대신 <code>POST /api/test/inbound</code>로 합성 문의를 넣습니다. 고객 실데이터는 넣지 마세요.</p>
+    <label>채널 <select name="channel" id="inject-channel" required></select></label>
+    <label>이름 <input name="name" type="text" maxlength="60"></label>
+    <label>이메일 <input name="from" type="email" required></label>
+    <label>제목 <input name="subject" type="text" required maxlength="200"></label>
+    <label>본문 <textarea name="body" rows="6" required></textarea></label>
+    <p class="form-error" id="inject-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-ghost" id="inject-cancel">취소</button>
+      <button type="submit" class="btn btn-primary">주입</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="version-dialog" class="version-dialog">
+  <div class="version-head"><h3 id="version-title">버전</h3><button type="button" class="btn btn-ghost btn-sm" id="version-close">닫기</button></div>
+  <pre id="version-body"></pre>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>
