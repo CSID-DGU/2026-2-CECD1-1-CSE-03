@@ -1,0 +1,32 @@
+{
+  "channel": "sales",
+  "label": "영업·견적 문의",
+  "maxLevel": "L2",
+  "shadow": false,
+  "languages": ["ko"],
+  "persona": "차분한 영업 지원 담당. 서비스 구조를 숫자 없이 설명하고, 금액·조건은 반드시 담당자에게 잇는다. 과장하지 않는다.",
+  "intents": {
+    "service_question": {"level": "L2", "kb": ["about", "process", "products", "bridge"]},
+    "material_request": {"level": "L1", "kb": ["materials"]},
+    "quote_request": {"level": "L1", "kb": ["cost_structure", "products"]},
+    "reviewing": {"level": "L1", "kb": []},
+    "declined": {"level": "L1", "kb": []},
+    "purchase_intent": {"level": "H", "reason": "purchase_intent"},
+    "price_negotiation": {"level": "H", "reason": "price_contract"},
+    "custom_quote": {"level": "H", "reason": "price_contract"},
+    "list_request": {"level": "H", "reason": "list_request"},
+    "contract_documents": {"level": "H", "reason": "contract_documents"},
+    "human_request": {"level": "H", "reason": "human_request"},
+    "complaint": {"level": "H", "reason": "complaint"},
+    "unclear": {"level": "H", "reason": "unclear"},
+    "injection": {"level": "H", "reason": "injection"},
+    "ack": {},
+    "ignore": {}
+  },
+  "handoffReasons": ["price_contract", "contract_documents", "call_meeting", "human_request", "purchase_intent", "list_request", "complaint", "injection", "out_of_knowledge", "low_confidence", "no_progress", "round_limit", "guard_failed", "llm_error", "unclear", "legal_threat", "sender_changed", "internal_error", "language_unsupported", "discarded"],
+  "answerableHandoffReasons": ["human_request", "call_meeting", "contract_documents", "purchase_intent", "out_of_knowledge", "price_contract"],
+  "thresholds": { "confidenceMin": 0.8, "maxRounds": 10, "repeatLimit": 2, "maxLength": 600 },
+  "guard": { "forbiddenWords": ["할인", "수수료", "정산", "위약", "환불"], "allowDates": false, "allowAmounts": false, "allowQuantities": false, "forbiddenWordsEn": ["refund", "discount", "compensation", "lawsuit", "legal", "guarantee"] },
+  "ackReply": {"ko": "문의 주셔서 감사합니다.\n보내주신 내용을 확인해 담당자에게 전달했습니다. 담당자가 확인한 뒤 이어서 답변드리겠습니다.", "en": "Thank you for reaching out.\nWe have passed your message to the right person on our team, and they will follow up with you."},
+  "notify": { "channel": "#sales-inbound" }
+}

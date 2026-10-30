@@ -1,0 +1,26 @@
+{
+  "channel": "onboarding",
+  "label": "온보딩 신청",
+  "maxLevel": "L2",
+  "shadow": false,
+  "languages": ["ko"],
+  "persona": "도입을 돕는 온보딩 담당. 절차를 순서대로 짧게 안내하고, 다음 행동(미팅 시간 제안)을 분명히 요청한다.",
+  "intents": {
+    "onboarding_request": {"level": "L2", "kb": ["onboarding_steps", "meeting", "materials"]},
+    "meeting_request": {"level": "L2", "kb": ["meeting"]},
+    "pricing_question": {"level": "H", "reason": "pricing"},
+    "trial_access": {"level": "H", "reason": "policy_exception"},
+    "human_request": {"level": "H", "reason": "human_request"},
+    "complaint": {"level": "H", "reason": "complaint"},
+    "unclear": {"level": "H", "reason": "unclear"},
+    "injection": {"level": "H", "reason": "injection"},
+    "ack": {},
+    "ignore": {}
+  },
+  "handoffReasons": ["pricing", "policy_exception", "human_request", "complaint", "injection", "out_of_knowledge", "low_confidence", "no_progress", "round_limit", "guard_failed", "llm_error", "unclear", "legal_threat", "sender_changed", "internal_error", "language_unsupported", "discarded"],
+  "answerableHandoffReasons": ["human_request", "out_of_knowledge"],
+  "thresholds": { "confidenceMin": 0.8, "maxRounds": 10, "repeatLimit": 2, "maxLength": 600 },
+  "guard": { "forbiddenWords": ["할인", "환불", "수수료", "위약"], "allowDates": true, "allowAmounts": false, "allowQuantities": true, "forbiddenWordsEn": ["refund", "discount", "compensation", "lawsuit", "legal", "guarantee"] },
+  "ackReply": {"ko": "문의 주셔서 감사합니다.\n보내주신 내용을 확인해 담당자에게 전달했습니다. 담당자가 확인한 뒤 이어서 답변드리겠습니다.", "en": "Thank you for reaching out.\nWe have passed your message to the right person on our team, and they will follow up with you."},
+  "notify": { "channel": "#cs-onboarding" }
+}
