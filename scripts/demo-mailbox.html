@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>우편함 — 고객 메일함</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* npm run demo:mail 의 고객 쪽 화면. 백오피스(web/, 어두운 화면·보라 강조)와 섞이지 않게 밝은 무채색으로 둔다.
+   색은 새 답장 표시 하나에만 쓴다(--hue). 바탕은 편지지 같은 돌색. */
+:root {
+  --ground: #f4f3f1; --surface: #fff; --raised: #eeeeee; --border: #e6e6e6; --rule: #f0f0f0;
+  --text: #0a0a0a; --muted: #6b6b6b; --accent: #141414; --hue: #1d5fbf; --arrive: #eef3fb;
+  --radius-card: 8px; --radius-control: 6px; --gap: 12px; --pad: 24px;
+  --font: "Geist", "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--ground); color: var(--text); font: 14px/1.6 var(--font); font-variant-numeric: tabular-nums; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.col { width: min(1208px, 100% - 32px); margin: 0 auto; }
+
+/* 상단 막대: 48px, 바탕색 그대로, 로고가 열 왼쪽 끝에 */
+.bar .col { height: 48px; display: flex; align-items: center; gap: 10px; }
+.mark { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 6px; background: var(--accent); color: #fff; }
+.name { font-weight: 700; font-size: 15px; }
+.who { color: var(--muted); }
+.demo { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+/* 목록 384px + 열린 메일. 둘 다 같은 높이로 화면을 채운다 */
+.app { display: grid; grid-template-columns: 384px 1fr; gap: var(--gap); height: calc(100vh / var(--zoom, 1) - 48px - 16px); } /* zoom 은 vh 를 줄이지 않는다 */
+.panel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); min-height: 0; display: flex; flex-direction: column; }
+.tools { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--rule); }
+.tools h1 { margin: 0; font-size: 16px; font-weight: 500; }
+.count { color: var(--muted); }
+.primary { margin-left: auto; height: 36px; padding: 0 16px; border: 0; border-radius: var(--radius-control); background: var(--accent); color: #fff; font-weight: 500; }
+.primary:focus-visible, .row:focus-visible, .chip:focus-visible { outline: 2px solid var(--hue); outline-offset: 2px; }
+
+.rows { list-style: none; margin: 0; padding: 0; overflow: auto; }
+.row { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; width: 100%; padding: 12px 16px; border: 0; border-bottom: 1px solid var(--rule); background: none; text-align: left; }
+.row:hover { background: #fafafa; }
+.row[aria-selected="true"] { background: var(--raised); }
+.row .from { font-weight: 400; }
+.row.unread .from { font-weight: 700; }
+.row .time { color: var(--muted); font-size: 12px; }
+.row .subj { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .state { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--hue); }
+.row.unread .state { color: var(--hue); font-weight: 500; }
+.row.arrived { animation: arrive 1.6s ease-out; }
+@keyframes arrive { from { background: var(--arrive); } }
+.empty { color: var(--muted); padding: 24px 16px; margin: 0; }
+
+/* 열린 메일 · 새 메일 */
+.pane { padding: var(--pad) 32px; overflow: auto; }
+.pane h2 { margin: 0 0 4px; font-size: 24px; font-weight: 500; line-height: 1.35; }
+.pane .sub { color: var(--muted); margin: 0 0 20px; }
+.msg { padding: 18px 0; border-top: 1px solid var(--rule); }
+.msg.arrived { animation: arrive 1.6s ease-out; }
+.msg header { display: flex; gap: 8px; align-items: baseline; }
+.msg header b { font-weight: 500; }
+.msg header span { color: var(--muted); }
+.msg header time { margin-left: auto; color: var(--muted); font-size: 12px; }
+.msg .body { white-space: pre-wrap; margin-top: 8px; font-size: 15px; line-height: 1.75; }
+.wait { color: var(--muted); border-top: 1px solid var(--rule); padding-top: 14px; margin: 0; }
+
+.field { display: flex; gap: 12px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+.field > span:first-child { width: 64px; color: var(--muted); flex: none; }
+.field input, .field textarea { flex: 1; border: 0; padding: 0; font: inherit; font-size: 15px; color: var(--text); background: none; outline: none; }
+.field textarea { min-height: 180px; resize: vertical; line-height: 1.75; }
+.examples { display: flex; gap: 6px; align-items: center; color: var(--muted); padding: 12px 0; }
+.chip { height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface); }
+.chip:hover { background: #fafafa; }
+.send { display: flex; gap: 12px; align-items: center; margin-top: 16px; }
+.send .primary { margin-left: 0; }
+.send span { color: var(--muted); }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; height: auto; }
+  .demo { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .row.arrived, .msg.arrived { animation: none; } }
+</style>
+</head>
+<body>
+<header class="bar"><div class="col">
+  <span class="mark" aria-hidden="true"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="1.5" y="3" width="11" height="8" rx="1.2"/><path d="M2 3.8 7 7.6l5-3.8"/></svg></span>
+  <span class="name">우편함</span>
+  <span class="who" id="me"></span>
+  <span class="demo">데모 · 로컬 가짜 메일 서버</span>
+</div></header>
+<main class="col app">
+  <section class="panel" aria-label="대화 목록">
+    <div class="tools"><h1>대화</h1><span class="count" id="count"></span><button class="primary" id="new" type="button">새 메일</button></div>
+    <ul class="rows" id="rows" role="listbox" aria-label="대화"></ul>
+  </section>
+  <section class="panel pane" id="pane" aria-live="polite"></section>
+</main>
+<script>
+// ?zoom=1.5 — 녹화용. 1920×1080 창에서 1280×720 배치를 선명하게 그린다.
+const zoom = Number(new URLSearchParams(location.search).get('zoom')) || 1;
+if (zoom !== 1) { document.documentElement.style.zoom = zoom; document.documentElement.style.setProperty('--zoom', zoom); }
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const clock = (t) => new Date(t).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' });
+const ago = (t) => { const s = (Date.now() - t) / 1000; return s < 60 ? '방금' : s < 3600 ? `${Math.floor(s / 60)}분 전` : clock(t); };
+// 답장은 References 첫 id(없으면 In-Reply-To)로 원래 메일에 묶는다.
+const rootOf = (m) => (m.references || '').match(/<[^>]+>/)?.[0] || m.inReplyTo || m.messageId;
+
+let info; let mails = []; let last = '';
+let view = 'compose'; let open = null; // view: compose | thread
+const read = new Map(); // root → 읽은 마지막 uid
+let known = null; // 직전 렌더에 있던 uid(새로 도착한 것만 깜빡인다)
+
+async function boot() {
+  info = await (await fetch('/api/info')).json();
+  $('#me').textContent = `${info.customer.name} · ${info.customer.email}`;
+  $('#new').onclick = () => { view = 'compose'; open = null; render(); $('#subject')?.focus(); };
+  render();
+  refresh();
+  setInterval(refresh, 1000);
+  setInterval(() => document.querySelectorAll('[data-at]').forEach((el) => { el.textContent = ago(Number(el.dataset.at)); }), 15000);
+}
+
+function threads() {
+  const map = new Map();
+  for (const m of mails) { const k = rootOf(m); if (!map.has(k)) map.set(k, []); map.get(k).push(m); }
+  return [...map].map(([root, list]) => ({ root, list, lastAt: list.at(-1).at })).sort((a, b) => b.lastAt - a.lastAt);
+}
+const unread = (t) => t.list.some((m) => !m.mine && m.uid > (read.get(t.root) || 0));
+
+function renderRows(ts, fresh) {
+  $('#count').textContent = ts.length ? `${ts.length}` : '';
+  $('#rows').innerHTML = ts.length ? ts.map((t) => {
+    const replied = t.list.some((m) => !m.mine);
+    const other = t.list.find((m) => !m.mine);
+    const state = unread(t) ? '<span class="dot" aria-hidden="true"></span>새 답장' : replied ? `메일 ${t.list.length}통` : '답장 대기';
+    return `<li><button class="row${unread(t) ? ' unread' : ''}${t.list.some((m) => fresh.has(m.uid)) ? ' arrived' : ''}" role="option" aria-selected="${view === 'thread' && open === t.root}" data-root="${esc(t.root)}" type="button">
+      <span class="from">${esc(other ? other.fromName : `나 → ${info.supportName}`)}</span><span class="time" data-at="${t.lastAt}">${ago(t.lastAt)}</span>
+      <span class="subj">${esc(t.list[0].subject)}</span><span class="state">${state}</span></button></li>`;
+  }).join('') : '<li><p class="empty">보낸 문의가 없습니다. 새 메일로 시작하세요.</p></li>';
+  for (const b of document.querySelectorAll('.row')) b.onclick = () => { view = 'thread'; open = b.dataset.root; render(); };
+}
+
+function renderPane(ts, fresh) {
+  const pane = $('#pane');
+  if (view === 'compose') {
+    if (pane.querySelector('#compose')) return; // 쓰던 내용 유지
+    pane.innerHTML = `<form id="compose">
+      <h2>새 메일</h2>
+      <div class="field"><span>받는 사람</span><span>${esc(info.supportName)} &lt;${esc(info.support)}&gt;</span></div>
+      <div class="examples">예시 ${info.presets.map((p, i) => `<button class="chip" type="button" data-i="${i}">${esc(p.label)}</button>`).join('')}</div>
+      <div class="field"><span>제목</span><input id="subject" maxlength="200" required aria-label="제목"></div>
+      <div class="field"><span>내용</span><textarea id="body" maxlength="5000" required aria-label="내용"></textarea></div>
+      <div class="send"><button class="primary" type="submit">보내기</button><span id="status" role="status"></span></div>
+    </form>`;
+    for (const c of pane.querySelectorAll('.chip')) c.onclick = () => { const p = info.presets[c.dataset.i]; $('#subject').value = p.subject; $('#body').value = p.body; };
+    $('#compose').onsubmit = send;
+    return;
+  }
+  const t = ts.find((x) => x.root === open);
+  if (!t) { pane.innerHTML = '<p class="empty">왼쪽에서 대화를 고르세요.</p>'; return; }
+  read.set(t.root, t.list.at(-1).uid);
+  pane.innerHTML = `<h2>${esc(t.list[0].subject)}</h2>
+    <p class="sub">${esc(info.supportName)} &lt;${esc(info.support)}&gt; 와 주고받은 메일 ${t.list.length}통</p>
+    ${t.list.map((m) => `<section class="msg${fresh.has(m.uid) ? ' arrived' : ''}">
+      <header><b>${esc(m.mine ? '나' : m.fromName)}</b><span>${esc(m.mine ? `→ ${info.supportName}` : `<${info.support}>`)}</span><time>${clock(m.at)}</time></header>
+      <div class="body">${esc(m.body)}</div></section>`).join('')}
+    ${t.list.at(-1).mine ? '<p class="wait">답장을 기다리는 중입니다.</p>' : ''}`;
+}
+
+function render(fresh = new Set()) {
+  const ts = threads();
+  renderPane(ts, fresh); // 열린 대화를 먼저 읽음 처리해야 목록의 새 답장 표시가 맞다
+  renderRows(ts, fresh);
+}
+
+async function send(e) {
+  e.preventDefault();
+  const r = await fetch('/api/send', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ subject: $('#subject').value, body: $('#body').value }) });
+  if (!r.ok) { $('#status').textContent = `보내지 못했습니다: ${(await r.json().catch(() => ({}))).error || r.status}`; return; }
+  const { messageId } = await r.json();
+  await refresh();
+  view = 'thread'; open = messageId; render();
+}
+
+async function refresh() {
+  const next = await fetch('/api/mail').then((r) => r.json()).catch(() => null);
+  if (!next) return;
+  const key = next.map((m) => m.uid).join(',');
+  if (key === last) return;
+  last = key; mails = next;
+  const fresh = new Set(known ? next.filter((m) => !known.has(m.uid)).map((m) => m.uid) : []);
+  known = new Set(next.map((m) => m.uid));
+  render(fresh);
+}
+
+boot();
+</script>
+</body>
+</html>
