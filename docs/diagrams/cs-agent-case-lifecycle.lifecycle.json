@@ -1,0 +1,271 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "CS 응대 에이전트 — 케이스 상태",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1085,
+      600
+    ],
+    "views": [
+      {
+        "id": "main-path",
+        "label": "에이전트 응대 경로",
+        "focus": [
+          "open",
+          "agent_active",
+          "awaiting_approval",
+          "waiting_customer",
+          "closed"
+        ],
+        "note": "문의 접수 → 판단 → 승인 대기 → 발송 → 고객 회신 → 다시 판단. L2 intent 는 승인 대기를 거쳐 곧바로 자동 발송."
+      },
+      {
+        "id": "human-path",
+        "label": "사람 전담",
+        "focus": [
+          "agent_active",
+          "awaiting_approval",
+          "waiting_customer",
+          "handed_off"
+        ],
+        "note": "HANDOFF·인수·폐기·AAH 발송이면 HANDED_OFF. HANDOFF 는 접수 안내 한 통을 보내도 HANDED_OFF 그대로. 직접 답장은 WAITING_CUSTOMER(responder=human). 반환하면 미답 메시지를 즉시 다시 판단."
+      },
+      {
+        "id": "close-reopen",
+        "label": "종결·재오픈",
+        "focus": [
+          "open",
+          "agent_active",
+          "handed_off",
+          "waiting_customer",
+          "closed"
+        ],
+        "note": "첫 메시지 IGNORE·declined_ack·30일 무활동(sweeper)·담당자 종결로 CLOSED. 회신이 오거나 담당자가 재오픈하면 같은 케이스 OPEN."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "에이전트 응대"
+    },
+    {
+      "id": "human",
+      "label": "사람 전담"
+    },
+    {
+      "id": "terminal",
+      "label": "종결"
+    }
+  ],
+  "states": [
+    {
+      "id": "open",
+      "type": "start",
+      "label": "OPEN",
+      "sublabel": "접수 · llm_error 재시도",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "tag": "T1"
+    },
+    {
+      "id": "agent_active",
+      "type": "active",
+      "label": "AGENT_ACTIVE",
+      "sublabel": "루프 1회전 판단 중",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "tag": "runCycle"
+    },
+    {
+      "id": "awaiting_approval",
+      "type": "waiting",
+      "label": "AWAITING_APPROVAL",
+      "sublabel": "PENDING · 승인 대기",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "tag": "L1 · L2"
+    },
+    {
+      "id": "waiting_customer",
+      "type": "waiting",
+      "label": "WAITING_CUSTOMER",
+      "sublabel": "발송 완료 · 회신 대기",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "tag": "SENT"
+    },
+    {
+      "id": "closed",
+      "type": "success",
+      "label": "CLOSED",
+      "sublabel": "종결 · 자동 종결",
+      "lane": "terminal",
+      "col": 0,
+      "tag": "closed_at",
+      "yOffset": -40
+    },
+    {
+      "id": "handed_off",
+      "type": "external",
+      "label": "HANDED_OFF",
+      "sublabel": "responder=human",
+      "lane": "human",
+      "col": 0,
+      "tag": "브리핑 · 접수 안내"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "open-active",
+      "from": "open",
+      "to": "agent_active",
+      "note": "새 문의·재오픈 → runCycle. LLM 실패면 OPEN 으로 돌아가 2·5·10·30분 뒤 sweeper 가 재실행",
+      "variant": "emphasis"
+    },
+    {
+      "id": "active-approval",
+      "from": "agent_active",
+      "to": "awaiting_approval",
+      "note": "gate2 DRAFT · ANSWER_AND_HANDOFF → drafts PENDING",
+      "variant": "emphasis"
+    },
+    {
+      "id": "approval-waiting",
+      "from": "awaiting_approval",
+      "to": "waiting_customer",
+      "note": "사람 승인 또는 L2 자동 발송(agent:auto) → SENT",
+      "variant": "emphasis"
+    },
+    {
+      "id": "waiting-closed",
+      "from": "waiting_customer",
+      "to": "closed",
+      "note": "30일 무활동 자동 종결(sweeper · AWAITING_APPROVAL·SENDING 제외) 또는 담당자 종결",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "customer-reply",
+      "from": "waiting_customer",
+      "to": "agent_active",
+      "label": "고객 회신 (T2)",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "top",
+      "route": "top-channel",
+      "labelDy": 24
+    },
+    {
+      "id": "reopen",
+      "from": "closed",
+      "to": "open",
+      "label": "회신 도착 · 재오픈",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          402,
+          494
+        ],
+        [
+          16,
+          494
+        ],
+        [
+          16,
+          157
+        ]
+      ]
+    },
+    {
+      "id": "active-handoff",
+      "from": "agent_active",
+      "to": "handed_off",
+      "label": "HANDOFF · llm_error",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "approval-handoff",
+      "from": "awaiting_approval",
+      "to": "handed_off",
+      "label": "인수 · 폐기 · AAH 발송",
+      "variant": "security",
+      "route": "drop",
+      "labelDx": 36
+    },
+    {
+      "id": "return-to-agent",
+      "from": "handed_off",
+      "to": "agent_active",
+      "label": "반환",
+      "variant": "emphasis",
+      "fromSide": "left",
+      "toSide": "bottom",
+      "labelDx": -62
+    },
+    {
+      "id": "human-reply",
+      "from": "handed_off",
+      "to": "waiting_customer",
+      "label": "직접 답장",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "labelDx": -24
+    },
+    {
+      "id": "handoff-closed",
+      "from": "handed_off",
+      "to": "closed",
+      "label": "종결",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 50
+    },
+    {
+      "id": "active-closed",
+      "from": "agent_active",
+      "to": "closed",
+      "label": "첫 IGNORE · declined_ack",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "labelDx": -124,
+      "labelDy": -50
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "에이전트 경로",
+      "items": [
+        "DRAFT·ANSWER_AND_HANDOFF → AWAITING_APPROVAL · 승인 발송 → WAITING_CUSTOMER · 고객 회신마다 새 회차",
+        "L2 intent(팩 maxLevel·intent level 둘 다 L2, AUTO_SEND≠0)는 같은 회차에서 agent:auto 가 승인 경로로 발송 → WAITING_CUSTOMER. 막히면 AWAITING_APPROVAL 에 남는다",
+        "IGNORE·SHADOW 는 쉬는 상태로(restingState), 앞 초안이 STALE 이면 CARRY_OVER. 첫 메시지 IGNORE·declined_ack 은 바로 CLOSED(재오픈한 케이스는 제외)",
+        "LLM 실패 → OPEN 유지, 2·5·10·30분 뒤 재시도, 5번째 실패 → HANDED_OFF(llm_error)"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "사람 전담 · 종결",
+      "items": [
+        "HANDOFF·인수(OPEN·AGENT_ACTIVE·WAITING_CUSTOMER·AWAITING_APPROVAL 어디서나)·폐기 → HANDED_OFF, 대기 초안은 NOT_SELECTED · 폐기는 코드 브리핑",
+        "HANDOFF → 접수 안내(ACK) 한 통 — 케이스는 HANDED_OFF·responder=human 그대로. 케이스당 한 번, injection·legal_threat·sender_changed 는 안 보냄. 답으로 치지 않아 반환 때 그 메시지는 미답",
+        "직접 답장 → WAITING_CUSTOMER, responder=human 유지 · 반환 → 미답 메시지 즉시 회차(responder=human 일 때만, 아니면 409 not_handed_off · 돌고 있으면 409 busy)",
+        "담당자 종결은 발송 중만 아니면 어느 상태에서나 · 30일 무활동 자동 종결은 AWAITING_APPROVAL·SENDING 제외 · CLOSED 뒤 회신·재오픈 → OPEN"
+      ]
+    }
+  ]
+}

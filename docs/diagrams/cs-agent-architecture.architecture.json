@@ -1,0 +1,319 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CS 응대 에이전트 — 현재 아키텍처",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "roundtrip",
+        "label": "메일 왕복",
+        "focus": [
+          "customer",
+          "mailsrv",
+          "imap",
+          "http",
+          "loop",
+          "mailout"
+        ],
+        "note": "고객 메일이 IMAP으로 들어와 루프를 거쳐 SMTP로 돌아간다. 데모는 메일 서버만 가짜로 바꾼다."
+      },
+      {
+        "id": "decide",
+        "label": "판단과 기록",
+        "focus": [
+          "loop",
+          "policykb",
+          "llm",
+          "db"
+        ],
+        "note": "판단은 정책 팩을 읽는 코드가, 분류·작성·검수·브리핑은 LLM이 한다. 단계마다 SQLite에 남는다."
+      },
+      {
+        "id": "human",
+        "label": "사람 승인",
+        "focus": [
+          "web",
+          "http",
+          "loop",
+          "mailout"
+        ],
+        "note": "L1 초안과 넘김 케이스는 백오피스에서 담당자가 승인·인수한다."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "customer",
+      "type": "external",
+      "label": "고객",
+      "sublabel": "문의 · 회신 메일",
+      "pos": [
+        40,
+        280
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "mailsrv",
+      "type": "cloud",
+      "label": "메일 서버",
+      "sublabel": "Gmail | 데모 가짜 서버",
+      "pos": [
+        40,
+        500
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "imap",
+      "type": "backend",
+      "label": "수신 어댑터",
+      "sublabel": "IMAP 5초 · 읽기 전용",
+      "tag": "별도 프로세스",
+      "pos": [
+        300,
+        280
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "백오피스 web/",
+      "sublabel": "승인 · 인수 · 브리핑",
+      "pos": [
+        560,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "http",
+      "type": "backend",
+      "label": "HTTP 서버",
+      "sublabel": "/api/inbound · REST · SSE",
+      "pos": [
+        560,
+        280
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "policykb",
+      "type": "security",
+      "label": "정책 팩 + KB",
+      "sublabel": "policy/ · kb/ 마크다운",
+      "pos": [
+        820,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "loop",
+      "type": "backend",
+      "label": "에이전트 루프",
+      "sublabel": "거르기 · 판단 · 작성",
+      "tag": "runCycle",
+      "pos": [
+        820,
+        280
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "LLM 어댑터",
+      "sublabel": "mock | anthropic",
+      "pos": [
+        1080,
+        280
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "mailout",
+      "type": "external",
+      "label": "메일 어댑터",
+      "sublabel": "mock | smtp",
+      "pos": [
+        560,
+        500
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite",
+      "sublabel": "판단 기록 · 버전",
+      "pos": [
+        820,
+        500
+      ],
+      "size": [
+        150,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "메일",
+      "wraps": [
+        "customer",
+        "mailsrv"
+      ],
+      "pad": 16
+    },
+    {
+      "kind": "region",
+      "label": "scripts/",
+      "wraps": [
+        "imap"
+      ],
+      "pad": 16
+    },
+    {
+      "kind": "region",
+      "label": "server/ — Node 22 단일 프로세스 · 의존성 0",
+      "wraps": [
+        "web",
+        "http",
+        "policykb",
+        "loop",
+        "llm",
+        "mailout",
+        "db"
+      ],
+      "pad": 20
+    }
+  ],
+  "connections": [
+    {
+      "from": "customer",
+      "to": "mailsrv",
+      "label": "문의",
+      "labelDy": 80,
+      "labelDx": -30
+    },
+    {
+      "from": "mailsrv",
+      "to": "imap",
+      "label": "새 메일"
+    },
+    {
+      "from": "imap",
+      "to": "http",
+      "label": "POST /api/inbound",
+      "variant": "emphasis"
+    },
+    {
+      "from": "http",
+      "to": "loop",
+      "label": "runCycle · 승인",
+      "variant": "emphasis"
+    },
+    {
+      "from": "web",
+      "to": "http",
+      "label": "REST + SSE",
+      "labelDy": 80
+    },
+    {
+      "from": "loop",
+      "to": "policykb",
+      "label": "decide · KB 근거"
+    },
+    {
+      "from": "loop",
+      "to": "llm",
+      "label": "분류 · 작성 · 검수",
+      "variant": "dashed"
+    },
+    {
+      "from": "loop",
+      "to": "db",
+      "label": "판단 기록",
+      "labelDy": 80
+    },
+    {
+      "from": "loop",
+      "to": "mailout",
+      "label": "답장 · 접수 안내",
+      "variant": "emphasis"
+    },
+    {
+      "from": "mailout",
+      "to": "mailsrv",
+      "label": "SMTP",
+      "variant": "emphasis"
+    },
+    {
+      "from": "mailsrv",
+      "to": "customer",
+      "label": "답장",
+      "labelDy": -80,
+      "labelDx": 30
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "메일 왕복",
+      "items": [
+        "수신 어댑터가 5초마다 새 메일만 읽어(EXAMINE 읽기 전용) /api/inbound 로 넘긴다. 배포에서는 메일 웹훅(x-inbound-secret)도 같은 입구를 쓴다",
+        "발송은 메일 어댑터 smtp(STARTTLS · AUTH). 로컬 기본값은 mock",
+        "npm run demo:mail 은 메일 서버만 가짜 IMAP·SMTP로 바꾼다. 서버와 어댑터는 운영과 같은 코드"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "판단은 코드, 글은 LLM",
+      "items": [
+        "1차 거르기와 판단 1·2차는 정책 팩을 읽는 코드 규칙",
+        "LLM은 분류·작성·검수·브리핑만 한다. 모르면 넘긴다",
+        "결과 세 갈래: L2 자동 발송 · L1 승인 대기 · H 넘김(+접수 안내 한 통)"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "운영 장치",
+      "items": [
+        "모든 단계의 판단·사유·정책·KB·프롬프트 버전을 SQLite에 남긴다",
+        "Sweeper 15초 타이머가 재시도와 자동 종결을 맡는다",
+        "킬스위치 AUTO_SEND=0 · 알림 웹훅은 넘김·승인 대기만(PII 없음)"
+      ]
+    }
+  ]
+}

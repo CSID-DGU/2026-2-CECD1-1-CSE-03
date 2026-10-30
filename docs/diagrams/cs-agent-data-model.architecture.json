@@ -1,0 +1,313 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CS 응대 에이전트 — 데이터 모델 (SQLite)",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "case-hub",
+        "label": "케이스 중심",
+        "focus": [
+          "cases",
+          "case_threads",
+          "messages",
+          "loops",
+          "activities"
+        ],
+        "note": "케이스 1 = 문의 1. 수신 스레드와 발송 때 받은 provider 스레드 id 가 case_threads 로 케이스에 묶이고, 메시지는 케이스 아래 도착 순(rowid)."
+      },
+      {
+        "id": "agent-output",
+        "label": "에이전트 산출물",
+        "focus": [
+          "cases",
+          "drafts",
+          "messages",
+          "decisions",
+          "handoffs",
+          "dispatches",
+          "versions"
+        ],
+        "note": "초안·판단·넘김·발송 기록. 초안은 답하는 고객 메시지(trigger_message_id)와 회차가 본 마지막 발신(seen_out_rowid)을 남긴다. 판단 행마다 prompt·kb·policy 버전."
+      },
+      {
+        "id": "idempotency",
+        "label": "멱등 키",
+        "focus": [
+          "claims",
+          "case_threads",
+          "messages",
+          "drafts",
+          "dispatches"
+        ],
+        "note": "claims.key PK · case_threads.thread_id PK · messages.provider_message_id UQ · drafts.idempotency_key UQ · dispatches.idempotency_key UQ"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "case_threads",
+      "type": "database",
+      "label": "case_threads",
+      "sublabel": "thread_id PK · case_id FK",
+      "pos": [
+        40,
+        100
+      ],
+      "size": [
+        220,
+        66
+      ],
+      "tag": "멱등"
+    },
+    {
+      "id": "messages",
+      "type": "database",
+      "label": "messages",
+      "sublabel": "provider_message_id UQ · edited",
+      "pos": [
+        640,
+        100
+      ],
+      "size": [
+        220,
+        66
+      ],
+      "tag": "멱등"
+    },
+    {
+      "id": "loops",
+      "type": "database",
+      "label": "loops",
+      "sublabel": "lease_token · queue · retry_count",
+      "pos": [
+        330,
+        100
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "claims",
+      "type": "security",
+      "label": "claims",
+      "sublabel": "key PK · mailbox: · loop:",
+      "tag": "멱등",
+      "pos": [
+        940,
+        100
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "cases",
+      "type": "database",
+      "label": "cases",
+      "sublabel": "state · responder · closed_at",
+      "tag": "Aggregate",
+      "pos": [
+        330,
+        280
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "drafts",
+      "type": "database",
+      "label": "drafts",
+      "sublabel": "idempotency_key UQ · seen_out_rowid",
+      "pos": [
+        640,
+        280
+      ],
+      "size": [
+        220,
+        66
+      ],
+      "tag": "멱등"
+    },
+    {
+      "id": "dispatches",
+      "type": "database",
+      "label": "dispatches",
+      "sublabel": "idempotency_key UQ · draft_id FK",
+      "pos": [
+        940,
+        280
+      ],
+      "size": [
+        220,
+        66
+      ],
+      "tag": "멱등"
+    },
+    {
+      "id": "activities",
+      "type": "database",
+      "label": "activities",
+      "sublabel": "type · actor · payload",
+      "pos": [
+        40,
+        460
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "handoffs",
+      "type": "database",
+      "label": "handoffs",
+      "sublabel": "reason · briefing · returned_at",
+      "pos": [
+        330,
+        460
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "decisions",
+      "type": "database",
+      "label": "decisions",
+      "sublabel": "step · action · *_version",
+      "pos": [
+        640,
+        460
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "versions",
+      "type": "database",
+      "label": "versions",
+      "sublabel": "hash PK · prompt: · kb: · policy:",
+      "tag": "재현",
+      "pos": [
+        940,
+        460
+      ],
+      "size": [
+        220,
+        66
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "cases",
+      "to": "case_threads",
+      "label": "1 — n",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "bottom"
+    },
+    {
+      "from": "cases",
+      "to": "loops",
+      "label": "1 — 1",
+      "variant": "default"
+    },
+    {
+      "from": "cases",
+      "to": "messages",
+      "label": "1 — n",
+      "variant": "emphasis"
+    },
+    {
+      "from": "cases",
+      "to": "drafts",
+      "label": "1 — n",
+      "variant": "emphasis",
+      "labelDx": 21
+    },
+    {
+      "from": "drafts",
+      "to": "messages",
+      "label": "trigger_message_id",
+      "variant": "dashed"
+    },
+    {
+      "from": "dispatches",
+      "to": "drafts",
+      "label": "draft_id",
+      "variant": "default"
+    },
+    {
+      "from": "cases",
+      "to": "decisions",
+      "label": "1 — n",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "from": "cases",
+      "to": "handoffs",
+      "label": "1 — n",
+      "variant": "default",
+      "labelDy": 30
+    },
+    {
+      "from": "cases",
+      "to": "activities",
+      "label": "1 — n",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "top"
+    },
+    {
+      "from": "decisions",
+      "to": "versions",
+      "label": "*_version → hash",
+      "variant": "dashed",
+      "labelDy": -40
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "집합 단위",
+      "items": [
+        "cases 가 Aggregate — 케이스 1 = 문의 1. execute·승인 직전 state·responder·새 수신을 다시 읽는다(버전 칼럼은 없음)",
+        "loops: lease_token 리스 · queue · next_retry_at·retry_count·retry_message_id(LLM 재시도) · 칼럼 일부는 db.js MIGRATIONS 로 추가",
+        "drafts.trigger_message_id·decisions.message_id·messages.thread_id 는 FK 없는 참조 · seen_out_rowid 로 already_answered 판정"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "멱등을 만드는 UNIQUE",
+      "items": [
+        "claims.key — mailbox:<provider_message_id>(수신, 수신 트랜잭션 안) · loop:<case>:<msg>(회차)",
+        "messages.provider_message_id · case_threads.thread_id — 같은 메일·스레드는 한 번만",
+        "모르는 스레드의 회신은 In-Reply-To·References 를 messages.provider_message_id 와 맞춰 그 케이스로, 새 thread_id 는 case_threads 에 추가 · messages.auto_submitted = 자동 회신 헤더 표시",
+        "drafts.idempotency_key = draft:<id>(승인·L2 자동 발송)·human:<id>·ack:<id>(접수 안내) · dispatches.idempotency_key — 재시도도 한 통 · messages.sent_by=ack 는 답으로 안 침",
+        "versions.hash — prompt:<agent>·kb:<channel>:<lang>·policy:<channel> 원문, decisions *_version 으로 재현"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Postgres 이식",
+      "items": [
+        "도착 순서를 SQLite rowid 에 기댄다 → messages·drafts·decisions 에 seq bigserial",
+        "동기 node:sqlite 호출 → DB 층 전체를 async 로 · claim 은 ON CONFLICT DO NOTHING + 영향 행 수",
+        "INSERT OR IGNORE·스칼라 max() → ON CONFLICT·GREATEST · TEXT 시각 → timestamptz · JSON TEXT → jsonb"
+      ]
+    }
+  ]
+}
