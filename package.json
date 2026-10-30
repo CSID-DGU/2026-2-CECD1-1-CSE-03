@@ -1,0 +1,18 @@
+{
+  "name": "cs-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "범용 CS 응대 에이전트 + 휴먼인더루프 백오피스 (의존성 0, Node 22)",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --no-warnings=ExperimentalWarning server/index.js",
+    "test": "AUTO_SEND=0 node --no-warnings=ExperimentalWarning --test",
+    "demo": "node --no-warnings=ExperimentalWarning server/mock/demo.js",
+    "smoke:llm": "node --no-warnings=ExperimentalWarning server/mock/demo.js --provider=anthropic --record",
+    "sim": "node --no-warnings=ExperimentalWarning server/mock/sim.js",
+    "demo:mail": "node --no-warnings=ExperimentalWarning scripts/demo-mail.js"
+  }
+}
