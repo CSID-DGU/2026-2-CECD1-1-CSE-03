@@ -6,8 +6,8 @@ COPY server ./server
 COPY policy ./policy
 COPY kb ./kb
 COPY web ./web
-# 미러 수신 어댑터·정보주체 요청·감사 내보내기도 같은 이미지·같은 볼륨으로 돌린다(node scripts/inbound-imap.js · scripts/subject-request.js · scripts/audit-export.js)
-COPY scripts/inbound-imap.js scripts/subject-request.js scripts/audit-export.js ./scripts/
+# 미러 수신 어댑터·정보주체 요청·감사 내보내기도 같은 이미지·같은 볼륨으로 돌린다(node scripts/inbound-imap.js · scripts/inbound-ses.js · scripts/subject-request.js · scripts/audit-export.js)
+COPY scripts/inbound-imap.js scripts/inbound-ses.js scripts/subject-request.js scripts/audit-export.js ./scripts/
 # 운영 기본은 실발송(smtp). SMTP_HOST·SMTP_FROM·MAIL_ALLOWED_DOMAINS를 넣어야 나간다(허용 목록이 비면 전부 차단).
 # 발송 없는 시연만 MAIL_PROVIDER=mock + ALLOW_MOCK_MAIL=1 — 이 둘이 없으면 production에서 mock은 시작을 거부한다.
 # HOST: 서버 기본 바인드는 127.0.0.1 — 컨테이너 안에서는 모든 인터페이스로 열어야 포트 매핑(-p 127.0.0.1:3000:3000)이 산다.

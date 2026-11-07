@@ -334,4 +334,4 @@ async function main() {
 
 if (require.main === module) main();
 
-module.exports = { parseMessage, accept, headers, createParser, config, poll, loadState };
+module.exports = { parseMessage, accept, headers, createParser, config, poll, loadState, post };

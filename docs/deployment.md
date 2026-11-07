@@ -70,6 +70,12 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `IMAP_CHANNEL` (`support`) | `scripts/inbound-imap.js` `server/index.js` | 넘길 채널(서버는 미러 모드 시작 검사에 쓴다) |
 | `IMAP_MODE` (시연) | `scripts/inbound-imap.js` `server/index.js` | `mirror` = 공유 메일함 읽기 전용 미러. 받는 주소가 `IMAP_TO` 인 메일을 발신자와 무관하게 넘기되 `IMAP_TO`·`SMTP_FROM` 발신은 뺀다. 명령은 `EXAMINE`·`BODY.PEEK` 뿐이라 메일함이 바뀌지 않는다. UID 진행을 DB 폴더의 `imap-state.json` 에 저장해 재시작 뒤 이어 읽는다(`DB_PATH=:memory:` 면 어댑터 시작 거부). **어떤 메일도 나가지 않게** 서버와 어댑터 모두 `MAIL_PROVIDER=mock` + `AUTO_SEND` 끔 + `SHADOW_CHANNELS` 에 `IMAP_CHANNEL` 이 없으면 시작을 거부하고(production 이면 `ALLOW_MOCK_MAIL=1` 도), 서버는 이 조건이 아닌 미러 페이로드(`mirror: true`)를 저장하지 않고 503 으로 돌려보낸다(어댑터는 보류했다가 다시 보낸다). 서버와 어댑터는 같은 env 파일로 띄운다 |
 | `IMAP_AUTHSERV_ID` | `scripts/inbound-imap.js` | 우리 수신 메일 서버의 authserv-id(예: `mx.google.com`). 이 id 가 붙은 맨 위 `Authentication-Results` 헤더의 `dmarc=` 결과(`pass`·`fail`)를 페이로드 `senderAuth` 로 넘긴다. 그 아래 붙은 헤더는 발신자가 위조할 수 있어 보지 않는다. 비우면 넘기지 않는다(정보 없음 — 기동 시 경고) |
+| `AWS_REGION` (`ap-northeast-2`) | `server/aws.js` | SigV4 서명·엔드포인트 리전 |
+| `AWS_ACCESS_KEY_ID` `AWS_SECRET_ACCESS_KEY` `AWS_SESSION_TOKEN` | `server/aws.js` | 로컬 시험용 자격 증명. 비우면 EC2 인스턴스 역할(IMDSv2 — 토큰 → 역할 → 임시 자격 증명, 만료 5분 전 갱신). EC2 에서는 비운다 |
+| `SES_QUEUE_URL` `SES_BUCKET` | `scripts/inbound-ses.js` | SES 수신 어댑터(필수). SES 알림(SNS 원문 전달)을 받는 SQS 큐 URL과 원문 MIME 버킷. 큐에서 한 통씩 받아 S3 원문을 `SIM_URL` 의 `/api/inbound` 로 넘긴다. 서버 `/api/health` 가 실패하면 큐를 읽지 않는다 |
+| `SES_PREFIX` (`inbound/`) | `scripts/inbound-ses.js` | 객체 키 접두어. 다른 버킷·접두어 밖·이상한 글자의 키는 원문을 받지 않고 지운다 |
+| `SES_CHANNELS` | `scripts/inbound-ses.js` | `받는주소=채널` 쉼표 목록(필수). 봉투 수신자로 채널을 고르고, 매핑이 없으면 지운다. 이 주소들과 `SMTP_FROM` 발신은 넘기지 않는다 |
+| `SES_MODE` (비움) | `scripts/inbound-ses.js` | `mirror` 면 페이로드에 `mirror: true` 를 싣고, `MAIL_PROVIDER=mock` + `AUTO_SEND` 끔 + 매핑된 채널 전부 `SHADOW_CHANNELS` 가 아니면 시작하지 않는다(종료 코드 2). 설정 오류(401·403, 503 `mirror_unsafe`, 미러의 4xx, S3 403)는 메시지를 돌려놓고 5→10→20→40→60분 정지하며 로그 머리말은 `[ses] 정지` |
 
 ### 실 LLM 스모크 실행
 
