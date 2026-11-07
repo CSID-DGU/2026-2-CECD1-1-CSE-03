@@ -13,6 +13,7 @@
     "demo": "node --no-warnings=ExperimentalWarning server/mock/demo.js",
     "smoke:llm": "node --no-warnings=ExperimentalWarning server/mock/demo.js --provider=anthropic --record",
     "sim": "node --no-warnings=ExperimentalWarning server/mock/sim.js",
+    "sim:eval": "node --no-warnings=ExperimentalWarning scripts/sim/run.js",
     "demo:mail": "node --no-warnings=ExperimentalWarning scripts/demo-mail.js"
   }
 }
