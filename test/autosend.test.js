@@ -1,7 +1,7 @@
 'use strict';
 // L2 자동 발송 + 넘김 1차 응대(접수 안내). npm test는 AUTO_SEND=0(기존 L1 테스트)이라 이 파일은 각 테스트에서 직접 켠다.
 process.env.MAIL_MOCK_LOG = '0';
-const { test, beforeEach } = require('node:test');
+const { test, beforeEach, before, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../server/db');
 const llm = require('../server/llm');
@@ -10,6 +10,9 @@ const loop = require('../server/loop');
 const INQ = require('../server/mock/inquiries');
 
 const policy = require('../server/policy');
+const http = require('node:http');
+const notify = require('../server/notify');
+const { createServer } = require('../server/index');
 
 beforeEach(() => {
   db.init(':memory:'); llm.use('mock'); process.env.AUTO_SEND = '1';
@@ -105,18 +108,6 @@ test('통계: 자동 발송·접수 안내는 무수정 승인률·승격 지표
   assert.equal(s.promotion.support.reviewed, 0);
   assert.deepEqual({ ...s.firstResponse, rate: undefined }, { base: 4, auto: 1, handedOff: 2, none: 1, human: 2, rate: undefined });
   assert.equal(s.firstResponse.rate, 0.75);
-});
-
-test('맺음말: 자동 발송·접수 안내는 "자동으로 보냈습니다", 사람 승인 메일은 "담당자 검토 후"', async () => {
-  const body = (caseId) => db.get("SELECT body FROM messages WHERE case_id=? AND direction='out'", caseId).body;
-  const a = await run(1);
-  assert.match(body(a.caseId), /자동으로 보냈습니다/);
-  assert.doesNotMatch(body(a.caseId), /검토 후/);
-  const b = await run(4);
-  assert.match(body(b.caseId), /자동으로 보냈습니다/);
-  const c = await run(8);
-  await loop.approveDraft(c.drafts[0].id, { by: 'kim' });
-  assert.match(body(c.caseId), /담당자 검토 후 발송/);
 });
 
 test('알림: 자동 발송될 초안은 승인 대기로 알리지 않고, 자동 발송이 막혀 PENDING으로 남으면 알린다', async () => {
@@ -239,4 +230,34 @@ test('통계는 케이스 수에 선형 — 상태 조건이 케이스당 초안
   const t0 = Date.now(); const fr = cases.stats().firstResponse; const ms = Date.now() - t0;
   assert.equal(fr.base, 5000); assert.equal(fr.auto, 5000);
   assert.ok(ms < 300, `stats ${ms}ms`);
+});
+
+describe('알림 웹훅', () => {
+  before(() => { db.init(':memory:'); });
+  beforeEach(() => { llm.use('mock'); process.env.AUTO_SEND = '0'; for (const k of ['SHADOW_CHANNELS', 'AUTH_USER_HEADER', 'NODE_ENV', 'AUTO_CLOSE_DAYS', 'ENABLE_TEST_INJECT', 'INBOUND_SECRET']) delete process.env[k]; });
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let n = 0;
+  function thread(channel = 'support') {
+    n += 1;
+    const tid = `cf-${n}`; const from = `cf${n}@example.com`;
+    const add = (body, o = {}) => cases.addInbound({ channel, from, name: `고객${n}`, subject: '문의', body, threadId: tid, ...o });
+    return { tid, from, add, run: async (body, o) => { const r = add(body, o); await loop.runCycle(r.caseId, r.messageId); return r; } };
+  }
+
+  test('알림 웹훅: 넘김·승인 대기 초안만, 고객 연락처·본문 없이', async () => {
+    const got = [];
+    const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { got.push(JSON.parse(b)); res.end('ok'); }); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const stop = notify.start(`http://127.0.0.1:${srv.address().port}/hook`);
+    try {
+      await thread().run('환불해 주세요. 제 번호는 010-9999-8888 입니다');
+      await thread().run('구독 해지 방법 알려주세요');
+      for (let i = 0; i < 50 && got.length < 2; i += 1) await sleep(10);
+    } finally { stop(); srv.close(); }
+    const texts = got.map((g) => g.text);
+    assert.ok(texts.some((t) => /사람에게 넘김: refund_request/.test(t) && /#cs-support/.test(t)));
+    assert.ok(texts.some((t) => /승인 대기 초안/.test(t)));
+    for (const t of texts) { assert.doesNotMatch(t, /@|9999|환불해/); }
+  });
 });

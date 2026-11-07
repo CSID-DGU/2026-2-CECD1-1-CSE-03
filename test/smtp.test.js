@@ -1,12 +1,19 @@
 'use strict';
 // SMTP provider — 네트워크 없이 프로세스 내 가짜 SMTP 서버(net/tls, 포트 0)로 검증.
 // STARTTLS/암묵적 TLS 케이스는 openssl로 메모리상 자체서명 인증서를 만들 수 있을 때만 돈다(디스크에 아무것도 안 씀).
-const { test, beforeEach, afterEach } = require('node:test');
+process.env.MAIL_MOCK_LOG = '0';
+const { test, beforeEach, afterEach, before, describe } = require('node:test');
 const assert = require('node:assert/strict');
 const net = require('node:net');
 const tls = require('node:tls');
 const { execFileSync } = require('node:child_process');
 const smtp = require('../server/mail/smtp');
+const db = require('../server/db');
+const llm = require('../server/llm');
+const cases = require('../server/cases');
+const loop = require('../server/loop');
+const mail = require('../server/mail');
+const { createServer } = require('../server/index');
 
 const FROM = 'ACME 상담 <support@acme.example>';
 
@@ -261,4 +268,112 @@ test('설정 누락: SMTP_HOST/SMTP_FROM 없으면 접속 없이 거부', async 
   await assert.rejects(smtp.send(msg()), /SMTP_HOST/);
   process.env.SMTP_HOST = '127.0.0.1';
   await assert.rejects(smtp.send(msg()), /SMTP_FROM/);
+});
+
+describe('운영 mock 메일 경고와 mock 발송 중복 방지', () => {
+  before(() => { db.init(':memory:'); });
+  beforeEach(() => { llm.use('mock'); process.env.AUTO_SEND = '0'; for (const k of ['SHADOW_CHANNELS', 'AUTH_USER_HEADER', 'NODE_ENV', 'AUTO_CLOSE_DAYS', 'ENABLE_TEST_INJECT', 'INBOUND_SECRET']) delete process.env[k]; });
+
+  async function withServer(fn) {
+    const server = createServer();
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const api = async (method, p, body, headers = {}) => {
+      const res = await fetch(`${base}${p}`, { method, headers: { 'content-type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined });
+      return { status: res.status, data: await res.json().catch(() => null) };
+    };
+    try { return await fn(api); } finally { server.close(); }
+  }
+
+  test('운영에서 mock 메일이면 경고, mock 발송은 같은 멱등키에 같은 id', async () => {
+    await withServer(async (api) => {
+      assert.equal((await api('GET', '/api/status')).data.mailWarning, undefined);
+      process.env.NODE_ENV = 'production';
+      assert.match((await api('GET', '/api/status')).data.mailWarning, /mock/);
+    });
+    const a = await mail.send({ to: 'x@example.com', subject: 's', body: 'b', idempotencyKey: 'same' });
+    const b = await mail.send({ to: 'x@example.com', subject: 's', body: 'b', idempotencyKey: 'same' });
+    assert.equal(a.id, b.id); assert.equal(b.duplicate, true);
+  });
+});
+
+describe('답장 스레드 묶기', () => {
+  const ENV = ['LLM_MOCK_DELAY_MS', 'MAIL_MOCK_DELAY_MS', 'MAIL_MOCK_FAIL', 'AUTH_USER_HEADER', 'PROXY_SHARED_SECRET', 'INBOUND_SECRET', 'LLM_RETRY_SCALE'];
+  before(() => { db.init(':memory:'); });
+  beforeEach(() => { llm.use('mock'); for (const k of ENV) delete process.env[k]; });
+
+  let n = 0;
+  function thread(channel = 'support') {
+    n += 1;
+    const tid = `f2-${n}`; const from = `f2-${n}@example.com`;
+    const add = (body, o = {}) => cases.addInbound({ channel, from, name: `고객${n}`, subject: '문의', body, threadId: tid, ...o });
+    return { tid, from, add, run: async (body, o) => { const r = add(body, o); await loop.runCycle(r.caseId, r.messageId); return r; } };
+  }
+  const pending = (id) => db.all("SELECT * FROM drafts WHERE case_id=? AND status='PENDING'", id);
+  /** 가짜 SMTP 서버(평문, 인증 없음) — 받은 DATA 원문을 모은다. */
+  async function fakeSmtp() {
+    const data = [];
+    const server = net.createServer((sock) => {
+      let buf = ''; let inData = false;
+      const w = (x) => sock.write(`${x}\r\n`);
+      w('220 fake');
+      sock.on('data', (d) => {
+        buf += d;
+        for (;;) {
+          if (inData) { const i = buf.indexOf('\r\n.\r\n'); if (i < 0) return; data.push(buf.slice(0, i)); buf = buf.slice(i + 5); inData = false; w('250 queued'); continue; }
+          const i = buf.indexOf('\r\n'); if (i < 0) return;
+          const line = buf.slice(0, i).toUpperCase(); buf = buf.slice(i + 2);
+          if (line.startsWith('EHLO')) w('250 fake'); else if (line === 'DATA') { inData = true; w('354 go'); } else if (line === 'QUIT') { w('221 bye'); sock.end(); } else w('250 ok');
+        }
+      });
+      sock.on('error', () => {});
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    return { data, port: server.address().port, close: () => { server.closeAllConnections?.(); server.close(); } };
+  }
+  const header = (raw, name) => raw.replace(/\r\n[ \t]+/g, ' ').split('\r\n').find((l) => l.toLowerCase().startsWith(`${name.toLowerCase()}:`))?.slice(name.length + 1).trim();
+
+  test('provider가 답장을 다른 스레드 id로 보내면 그 id도 케이스에 묶는다 — 고객 회신이 같은 케이스로', async () => {
+    const t = thread();
+    const r = await t.run('영수증 발급 방법 알려주세요');
+    const orig = mail.send;
+    mail.send = async () => ({ id: `stub:${db.uuid()}`, provider: 'stub', threadId: 'prov-thread-b-s4' });
+    try { await loop.approveDraft(pending(r.caseId)[0].id, { by: 'a' }); } finally { mail.send = orig; }
+    assert.equal(db.get('SELECT case_id FROM case_threads WHERE thread_id=?', 'prov-thread-b-s4').case_id, r.caseId);
+    const re = cases.addInbound({ channel: 'support', from: t.from, body: '감사합니다', threadId: 'prov-thread-b-s4' });
+    assert.equal(re.caseId, r.caseId); assert.equal(re.created, false);
+  });
+
+  test('smtp: 답장에 In-Reply-To/References를 달고 Message-ID를 스레드로 묶는다 — 고객 회신은 In-Reply-To만으로 같은 케이스', async () => {
+    const srv = await fakeSmtp();
+    const keys = ['MAIL_PROVIDER', 'MAIL_ALLOWED_DOMAINS', 'SMTP_HOST', 'SMTP_PORT', 'SMTP_FROM', 'SMTP_ALLOW_PLAIN'];
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    Object.assign(process.env, { MAIL_PROVIDER: 'smtp', MAIL_ALLOWED_DOMAINS: 'example.com', SMTP_HOST: '127.0.0.1', SMTP_PORT: String(srv.port), SMTP_FROM: 'ACME <support@acme.example>', SMTP_ALLOW_PLAIN: '1' });
+    try {
+      const t = thread();
+      const r = await t.run('영수증 발급 방법 알려주세요', { providerMessageId: '<cust-1@mail.example.com>' });
+      const sent = await loop.approveDraft(pending(r.caseId)[0].id, { by: 'a' });
+      const raw = srv.data[0];
+      assert.equal(header(raw, 'In-Reply-To'), '<cust-1@mail.example.com>');
+      assert.match(header(raw, 'References'), /<cust-1@mail\.example\.com>/);
+      const outId = db.get('SELECT provider_message_id p FROM messages WHERE id=?', sent.messageId).p;
+      assert.equal(header(raw, 'Message-ID'), outId);
+      assert.ok(db.get('SELECT 1 FROM case_threads WHERE thread_id=? AND case_id=?', outId, r.caseId), '발송 Message-ID가 케이스 스레드로 등록');
+      // 고객 회신: 수신 어댑터가 모르는 스레드 id + In-Reply-To(꺾쇠 없이 와도) → 같은 케이스, 그 스레드 id도 묶인다
+      const reply = cases.addInbound({ channel: 'support', from: t.from, body: '감사합니다', threadId: 'gmail-new-1', inReplyTo: outId.slice(1, -1), references: `<cust-1@mail.example.com> ${outId}` });
+      assert.equal(reply.caseId, r.caseId); assert.equal(reply.created, false);
+      assert.ok(db.get("SELECT 1 FROM case_threads WHERE thread_id='gmail-new-1' AND case_id=?", r.caseId));
+      // 스레드 id 없이 References만 와도 같은 케이스(원 고객 메일 id)
+      const r2 = cases.addInbound({ channel: 'support', from: t.from, body: '하나 더 물어볼게요', references: ['<cust-1@mail.example.com>'] });
+      assert.equal(r2.caseId, r.caseId);
+      // 모르는 id면 새 케이스
+      assert.equal(cases.addInbound({ channel: 'support', from: 'other@example.com', body: '새 문의', inReplyTo: '<nobody@x.example>' }).created, true);
+      // 헤더 주입은 토큰만 남는다
+      const built = require('../server/mail/smtp').buildMessage({ from: 'a@acme.example', to: 'b@example.com', subject: 's', body: 'b', inReplyTo: '<p@x.example>\r\nBcc: evil@x.example', references: ['<q@x.example>', 'junk'] });
+      assert.doesNotMatch(built, /Bcc:/); assert.equal(header(built, 'References'), '<q@x.example>');
+    } finally {
+      srv.close();
+      for (const k of keys) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+    }
+  });
 });
