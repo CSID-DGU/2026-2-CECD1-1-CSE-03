@@ -5,19 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CS Agent 백오피스</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="console.css">
 </head>
 <body>
 <header class="topbar">
   <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.5" y="4" width="15" height="12" rx="2.5"/><path d="M6.6 10.2l2.4 2.4 4.4-4.6"/></svg>
     <span class="brand-name" id="brand-name">CS Agent</span>
-    <span class="brand-sub">백오피스</span>
+    <h1 class="brand-title">백오피스</h1>
   </div>
   <div class="kpis" id="kpis" aria-label="지표"></div>
   <div class="topbar-right">
-    <span class="pill" id="agent-pill" title="에이전트 상태"><span class="dot"></span><span id="agent-pill-text">연결 중</span></span>
-    <span class="badges" id="provider-badges"></span>
-    <label class="reviewer">검토자 <input id="reviewer" type="text" placeholder="이름 입력" maxlength="40" autocomplete="off" aria-label="검토자 이름(승인·인수 기록에 남습니다)"></label>
-    <button id="btn-inject" class="btn btn-ghost" type="button">새 문의 주입 <span class="tag tag-test">테스트용</span></button>
+    <span class="agent-status" id="agent-status" title="에이전트 상태"><span class="dot" aria-hidden="true"></span><span id="agent-status-text">연결 중</span></span>
+    <label class="reviewer"><span class="sr-only">검토자</span><input id="reviewer" type="text" placeholder="검토자 이름" maxlength="40" autocomplete="off" aria-label="검토자 이름(승인·인수 기록에 남습니다)"></label>
+    <button id="btn-report" class="btn" type="button" hidden>리포트</button>
+    <button id="btn-inject" class="btn" type="button" hidden>테스트 문의 주입</button>
   </div>
 </header>
 
@@ -27,37 +29,41 @@
 </div>
 
 <main class="layout">
-  <aside class="filters" aria-label="필터">
-    <section>
-      <h2>빠른 보기</h2>
-      <div class="filter-list">
-        <button class="filter-btn" id="quick-pending" type="button">승인 대기만</button>
-      </div>
-    </section>
-    <section>
-      <h2>상태</h2>
-      <div id="state-filters" class="filter-list"></div>
-    </section>
-    <section>
-      <h2>채널</h2>
-      <div id="channel-filters" class="filter-list"></div>
-    </section>
-    <section>
-      <h2>승격 지표 <span class="hint">L0→L1</span></h2>
-      <div id="promotion" class="promotion"></div>
-    </section>
-    <section>
-      <h2>검색</h2>
-      <input id="search" type="search" placeholder="이름 · 이메일 · 제목" aria-label="검색">
-    </section>
-  </aside>
-
   <section class="list-wrap" aria-label="케이스 목록">
+    <div class="tabs" id="status-tabs" role="tablist" aria-label="케이스 상태"></div>
+    <div class="subtabs" id="sub-chips" role="group" aria-label="응대 중 세부 상태" hidden></div>
+    <div class="list-filters" role="search" aria-label="케이스 필터">
+      <select id="f-caseType" aria-label="유형"></select>
+      <select id="f-caseReason" aria-label="사유"></select>
+      <select id="f-priority" aria-label="우선순위"></select>
+      <select id="f-origin" aria-label="접수 경로"></select>
+      <select id="f-recordType" aria-label="사업 라인"></select>
+      <input id="search" type="search" placeholder="번호 · 제목 · 이름 · 이메일" maxlength="100" aria-label="검색">
+    </div>
     <div class="list-head">
+      <div class="view-toggle" role="group" aria-label="보기">
+        <button id="view-list" class="seg" type="button" aria-pressed="true">목록</button>
+        <button id="view-kanban" class="seg" type="button" aria-pressed="false">칸반</button>
+      </div>
       <span id="list-count">케이스</span>
+      <span class="conn" title="목록·상세 자동 갱신"><span class="dot" id="sse-dot"></span><span id="sse-text">연결 중</span></span>
+      <button id="quick-shadow" class="btn btn-ghost btn-sm" type="button" title="고객에게 나가지 않은 섀도 초안 중 아직 평가하지 않은 것" aria-pressed="false" hidden>섀도 평가</button>
       <button id="btn-refresh" class="btn btn-ghost btn-sm" type="button">새로고침</button>
     </div>
-    <ul id="case-list" class="case-list" role="listbox" aria-label="케이스"></ul>
+    <div class="case-table-wrap" id="case-table-wrap" role="tabpanel" aria-label="케이스 표">
+      <table class="case-table">
+        <thead>
+          <tr><th scope="col" class="num">번호</th><th scope="col">제목 · 문의자(고객사)</th><th scope="col">유형</th><th scope="col">사유</th><th scope="col">우선순위</th><th scope="col">상태(세부)</th><th scope="col">담당</th><th scope="col" class="num">최근 갱신</th></tr>
+        </thead>
+        <tbody id="case-rows"></tbody>
+      </table>
+      <div class="list-more" id="list-more" hidden><button id="btn-more" class="btn btn-sm" type="button">더 보기</button></div>
+    </div>
+    <div class="board" id="board" hidden>
+      <p class="board-live" id="board-live" role="status" aria-live="polite">카드를 다른 칸에 놓으면 상태가 바뀝니다. 키보드로는 카드를 열고 상세의 진행 단계에서 바꿉니다.</p>
+      <div class="board-cols" id="board-cols" role="group" aria-label="칸반 보드"></div>
+    </div>
+    <ul id="shadow-list" class="shadow-list" aria-label="미평가 섀도 초안" hidden></ul>
   </section>
 
   <section class="detail" id="detail" aria-label="케이스 상세" aria-live="polite">
@@ -65,19 +71,9 @@
   </section>
 </main>
 
-<footer class="live" id="live">
-  <div class="live-head">
-    <button id="live-toggle" class="live-toggle" type="button" aria-expanded="true" aria-controls="live-feed">에이전트 라이브</button>
-    <span class="conn"><span class="dot" id="sse-dot"></span><span id="sse-text">연결 중</span></span>
-    <span class="live-count" id="live-count"></span>
-    <button id="live-clear" class="btn btn-ghost btn-sm" type="button">비우기</button>
-  </div>
-  <ol id="live-feed" class="live-feed" aria-label="에이전트 단계 로그"></ol>
-</footer>
-
 <dialog id="inject-dialog">
   <form id="inject-form" novalidate>
-    <h3>새 문의 주입 <span class="tag tag-test">테스트용</span></h3>
+    <h3>테스트 문의 주입</h3>
     <p class="hint">실제 메일 수신 대신 <code>POST /api/test/inbound</code>로 합성 문의를 넣습니다. 고객 실데이터는 넣지 마세요.</p>
     <label>채널 <select name="channel" id="inject-channel" required></select></label>
     <label>이름 <input name="name" type="text" maxlength="60"></label>
@@ -92,11 +88,13 @@
   </form>
 </dialog>
 
-<dialog id="version-dialog" class="version-dialog">
-  <div class="version-head"><h3 id="version-title">버전</h3><button type="button" class="btn btn-ghost btn-sm" id="version-close">닫기</button></div>
-  <pre id="version-body"></pre>
+<dialog id="report-dialog" class="report-dialog" aria-labelledby="report-title">
+  <div class="version-head"><h3 id="report-title">운영 리포트</h3><span class="hint" id="report-at"></span><button type="button" class="btn btn-ghost btn-sm" id="report-refresh">새로고침</button><button type="button" class="btn btn-ghost btn-sm" id="report-close">닫기</button></div>
+  <div class="promotion" id="promotion" role="group" aria-label="채널별 승격 지표 (L0→L1)"></div>
+  <div class="report-body" id="report-body"></div>
 </dialog>
 
 <script src="app.js"></script>
+<script src="console.js"></script>
 </body>
 </html>
