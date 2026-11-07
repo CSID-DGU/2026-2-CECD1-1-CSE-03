@@ -1,0 +1,368 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "CS 응대 에이전트 E2E",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "agent-path",
+        "label": "에이전트 경로",
+        "focus": [
+          "inbox",
+          "intake",
+          "prefilter",
+          "triage",
+          "gate1",
+          "responder",
+          "reviewer",
+          "execute"
+        ],
+        "note": "고객 메일 1통이 케이스에 붙고, 코드 규칙과 LLM 에이전트 3개를 번갈아 거쳐 실행 단계의 action 하나로 끝난다."
+      },
+      {
+        "id": "human-entry",
+        "label": "사람이 들어오는 길",
+        "focus": [
+          "execute",
+          "queue",
+          "briefer",
+          "human"
+        ],
+        "note": "초안·답장+넘김은 승인 큐, 섀도 초안은 평가 목록, 넘김은 인계 Agent 브리핑과 함께 사람 전담. 담당자는 신규·응대 중 케이스를 인수할 수 있다."
+      },
+      {
+        "id": "human-exit",
+        "label": "사람이 나가는 길",
+        "focus": [
+          "human",
+          "send",
+          "prefilter"
+        ],
+        "note": "승인·직접 답장은 발송으로. 반환은 마지막 미답 고객 메시지로 즉시 회차. 종결 뒤 회신도 같은 케이스로(에이전트 담당: 새 질문은 다시 응대, 인사·확인은 다시 종결 · 사람 담당: 사람 전담 + 웹훅)."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "channel_lane",
+      "label": "고객 · 수신"
+    },
+    {
+      "id": "code_lane",
+      "label": "코드 게이트"
+    },
+    {
+      "id": "agents_lane",
+      "label": "LLM 에이전트"
+    },
+    {
+      "id": "hitl_lane",
+      "label": "사람 · 백오피스"
+    }
+  ],
+  "phases": [
+    {
+      "id": "receive",
+      "label": "수신 · 접수",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "reason",
+      "label": "판단 · 작성 · 검사",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "act",
+      "label": "실행 · 사람 개입 · 발송",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "inbox",
+    "intake",
+    "prefilter",
+    "triage",
+    "gate1",
+    "responder",
+    "reviewer",
+    "execute",
+    "queue",
+    "human",
+    "send"
+  ],
+  "nodes": [
+    {
+      "id": "inbox",
+      "lane": "channel_lane",
+      "col": 0,
+      "type": "external",
+      "label": "수신 창구",
+      "sublabel": "IMAP 어댑터 · 웹훅 · 문의 폼",
+      "tag": "support · sales · onboarding",
+      "width": 140
+    },
+    {
+      "id": "send",
+      "lane": "channel_lane",
+      "col": 5,
+      "type": "external",
+      "label": "발송",
+      "sublabel": "mail mock | smtp",
+      "width": 140
+    },
+    {
+      "id": "intake",
+      "lane": "channel_lane",
+      "col": 1,
+      "type": "database",
+      "label": "케이스 접수",
+      "sublabel": "스레드 묶기 · 중복 차단",
+      "tag": "addInbound",
+      "width": 140
+    },
+    {
+      "id": "prefilter",
+      "lane": "code_lane",
+      "col": 1,
+      "type": "security",
+      "label": "1차 거르기",
+      "sublabel": "코드 규칙 · LLM 전",
+      "tag": "prefilter",
+      "width": 140
+    },
+    {
+      "id": "gate1",
+      "lane": "code_lane",
+      "col": 2,
+      "type": "security",
+      "label": "판단 1차",
+      "sublabel": "규칙 1–8",
+      "tag": "decide",
+      "width": 140
+    },
+    {
+      "id": "execute",
+      "lane": "code_lane",
+      "col": 4,
+      "type": "security",
+      "label": "판단 2차 · 실행",
+      "sublabel": "규칙 9–12 · 기록",
+      "tag": "execute",
+      "width": 140
+    },
+    {
+      "id": "triage",
+      "lane": "agents_lane",
+      "col": 1,
+      "type": "backend",
+      "label": "접수 Agent",
+      "sublabel": "intent · kbHit · 위험 신호",
+      "width": 140,
+      "tag": "Triage"
+    },
+    {
+      "id": "responder",
+      "lane": "agents_lane",
+      "col": 2,
+      "type": "backend",
+      "label": "답장 Agent",
+      "sublabel": "KB 사실만 · usedFacts",
+      "width": 140,
+      "tag": "Responder"
+    },
+    {
+      "id": "reviewer",
+      "lane": "agents_lane",
+      "col": 3,
+      "type": "backend",
+      "label": "검사",
+      "sublabel": "코드 guard → 검수 Agent",
+      "tag": "Reviewer · 실패 시 1회 재작성",
+      "width": 140
+    },
+    {
+      "id": "briefer",
+      "lane": "agents_lane",
+      "col": 5,
+      "type": "backend",
+      "label": "인계 Agent",
+      "sublabel": "Briefer · 인수인계 노트",
+      "width": 140
+    },
+    {
+      "id": "queue",
+      "lane": "hitl_lane",
+      "col": 4,
+      "type": "messagebus",
+      "label": "승인 큐 · 섀도",
+      "sublabel": "PENDING · SHADOW 초안",
+      "width": 140
+    },
+    {
+      "id": "human",
+      "lane": "hitl_lane",
+      "col": 5,
+      "type": "frontend",
+      "label": "담당자 대시보드",
+      "sublabel": "상태 탭 · 칸반(승인 대기 열) · Path",
+      "tag": "승인 · 보류 · 종결",
+      "width": 170
+    }
+  ],
+  "edges": [
+    {
+      "id": "inbox-intake",
+      "from": "inbox",
+      "to": "intake",
+      "label": "/api/inbound",
+      "role": "main"
+    },
+    {
+      "id": "intake-prefilter",
+      "from": "intake",
+      "to": "prefilter",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "id": "prefilter-triage",
+      "from": "prefilter",
+      "to": "triage",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "id": "triage-gate1",
+      "from": "triage",
+      "to": "gate1",
+      "role": "main"
+    },
+    {
+      "id": "gate1-responder",
+      "from": "gate1",
+      "to": "responder",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "id": "responder-reviewer",
+      "from": "responder",
+      "to": "reviewer",
+      "role": "main"
+    },
+    {
+      "id": "reviewer-execute",
+      "from": "reviewer",
+      "to": "execute",
+      "label": "통과 · 탈락",
+      "role": "main"
+    },
+    {
+      "id": "prefilter-execute",
+      "from": "prefilter",
+      "to": "execute",
+      "label": "IGNORE · HANDOFF",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "gate1-execute",
+      "from": "gate1",
+      "to": "execute",
+      "label": "규칙 1–7",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "execute-queue",
+      "from": "execute",
+      "to": "queue",
+      "label": "초안 · 섀도",
+      "role": "main"
+    },
+    {
+      "id": "execute-send",
+      "from": "execute",
+      "to": "send",
+      "label": "L2 자동 발송",
+      "role": "branch",
+      "variant": "dashed"
+    },
+    {
+      "id": "execute-briefer",
+      "from": "execute",
+      "to": "briefer",
+      "label": "HANDOFF · 사람 전담",
+      "role": "branch"
+    },
+    {
+      "id": "briefer-human",
+      "from": "briefer",
+      "to": "human",
+      "role": "branch",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "id": "queue-human",
+      "from": "queue",
+      "to": "human",
+      "role": "main"
+    },
+    {
+      "id": "human-send",
+      "from": "human",
+      "to": "send",
+      "label": "승인 · 직접 답장",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "human-prefilter",
+      "from": "human",
+      "to": "prefilter",
+      "label": "반환",
+      "role": "return",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "수신 → 케이스",
+      "items": [
+        "IMAP 폴링 · 웹훅 · 문의 폼 메일 → /api/inbound",
+        "고객 회신 = 같은 케이스의 다음 회차 · 종결 뒤 회신도 같은 케이스"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "코드 판단 · LLM 4역할",
+      "items": [
+        "LLM 어댑터 mock | anthropic · JSON 스키마 출력",
+        "LLM은 접수·답장·검수·인계 Agent 4역할만, 판단은 코드 규칙"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "사람 개입 · 탈출",
+      "items": [
+        "들어옴: 승인 큐 · 넘김 브리핑 · 인수",
+        "나감: 승인 발송 · 직접 답장 · 반환 · 종결"
+      ]
+    }
+  ]
+}

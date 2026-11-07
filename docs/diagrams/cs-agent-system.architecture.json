@@ -31,7 +31,7 @@
           "mail",
           "db"
         ],
-        "note": "npm run sim 합성 문의 · mock LLM · mock 메일 · SQLite 파일 · 인증 없음 · 테스트 주입(ENABLE_TEST_INJECT)."
+        "note": "npm run sim 합성 문의 · mock LLM · mock 메일 · SQLite 파일 · 인증 없음 · 테스트 주입(production 밖 mock 메일, 또는 ENABLE_TEST_INJECT=1)."
       },
       {
         "id": "deployed",
@@ -45,7 +45,7 @@
           "volume",
           "notify"
         ],
-        "note": "웹훅 + INBOUND_SECRET · 프록시 AUTH_USER_HEADER + PROXY_SHARED_SECRET · 127.0.0.1:3000 · anthropic · SMTP · 알림 웹훅 · 볼륨 · /api/health."
+        "note": "웹훅 + INBOUND_SECRET · 프록시 AUTH_USER_HEADER + PROXY_SHARED_SECRET · anthropic · SMTP · 알림 웹훅 · 볼륨 · /api/health · 토큰 예산 · 보존 기간."
       }
     ]
   },
@@ -53,7 +53,7 @@
     {
       "id": "sim",
       "type": "external",
-      "label": "npm run sim / demo",
+      "label": "npm run sim",
       "sublabel": "합성 문의 주입",
       "tag": "LOCAL",
       "pos": [
@@ -128,7 +128,7 @@
       "id": "http",
       "type": "backend",
       "label": "HTTP 서버 node:http",
-      "sublabel": "REST · SSE · /api/health",
+      "sublabel": "REST · CRM · SSE",
       "pos": [
         300,
         220
@@ -142,7 +142,7 @@
       "id": "sweeper",
       "type": "backend",
       "label": "Sweeper 타이머",
-      "sublabel": "15초 · 재시도 · 자동 종결",
+      "sublabel": "15초 · 재시도 · 종결 · 파기",
       "pos": [
         300,
         380
@@ -171,7 +171,7 @@
       "type": "backend",
       "label": "Loop runner",
       "sublabel": "runCycle · approve · L2",
-      "tag": "inflight · sending 메모리",
+      "tag": "리스 · 큐",
       "pos": [
         580,
         220
@@ -185,7 +185,7 @@
       "id": "db",
       "type": "database",
       "label": "SQLite node:sqlite",
-      "sublabel": "DB_PATH 파일 · versions",
+      "sublabel": "처리 테이블 · CRM 문서",
       "pos": [
         580,
         380
@@ -388,7 +388,7 @@
     {
       "from": "sweeper",
       "to": "db",
-      "label": "자동 종결",
+      "label": "자동 종결 · 파기",
       "variant": "dashed",
       "fromSide": "right",
       "toSide": "left",
@@ -412,7 +412,7 @@
     {
       "from": "loop",
       "to": "notify",
-      "label": "넘김·승인 대기만",
+      "label": "넘김·승인 대기·종결 뒤 회신",
       "variant": "dashed",
       "fromSide": "right",
       "toSide": "left"
@@ -420,7 +420,7 @@
     {
       "from": "loop",
       "to": "db",
-      "label": "claims · drafts",
+      "label": "판단 · 초안 기록",
       "variant": "default",
       "labelDy": 30,
       "labelDx": -48
@@ -428,7 +428,7 @@
     {
       "from": "loop",
       "to": "mail",
-      "label": "send(멱등키) · 승인·L2·접수 안내",
+      "label": "승인 → 발송 · L2 · 접수 안내",
       "variant": "default",
       "fromSide": "bottom",
       "toSide": "top"
@@ -460,8 +460,8 @@
       "title": "공통 코어",
       "items": [
         "로컬·배포 같은 코드 · 의존성 0(node:http · node:sqlite · fetch · SSE)",
-        "inflight·sending 집합이 메모리에 있어 인스턴스 1개. 늘리려면 Postgres + 공유 잠금",
-        "수신 스레딩: 스레드 id 우선, 모르는 스레드면 In-Reply-To·References 가 가리키는 기존 메일(messages.provider_message_id)의 케이스 · 제목 매칭 없음"
+        "회차 상태 일부가 프로세스 메모리에 있어 인스턴스 1개. 늘리려면 Postgres + 공유 잠금",
+        "수신 스레딩: 스레드 id 우선, 모르는 스레드면 In-Reply-To·References 가 가리키는 기존 메일의 케이스 · 제목 매칭 없음"
       ]
     },
     {
@@ -469,16 +469,17 @@
       "title": "LOCAL",
       "items": [
         "npm run sim → /api/inbound · mock LLM·메일 · SQLite 파일 · 인증 없음",
-        "테스트 주입 /api/test/inbound — production 밖 또는 ENABLE_TEST_INJECT=1"
+        "npm run demo 는 서버 없이 메모리 DB 에서 같은 루프를 돈다",
+        "테스트 주입 /api/test/inbound — production 밖 mock 메일, 또는 ENABLE_TEST_INJECT=1"
       ]
     },
     {
       "dot": "rose",
       "title": "DEPLOYED",
       "items": [
-        "프록시가 AUTH_USER_HEADER·PROXY_SHARED_SECRET 헤더 주입 · -p 127.0.0.1:3000:3000 · 웹훅 INBOUND_SECRET",
-        "production 의 mock 메일은 ALLOW_MOCK_MAIL=1 없으면 시작 거부 · 볼륨 /app/data · /api/health",
-        "알림은 넘김·승인 대기만(PII 없음) · 킬스위치 SHADOW_CHANNELS(섀도로) · AUTO_SEND=0(L2 자동 발송·접수 안내 끔)"
+        "production 의 mock 메일은 ALLOW_MOCK_MAIL=1 없으면 시작 거부 · 볼륨 /app/data",
+        "알림은 넘김·승인 대기·사람 담당 종결 케이스의 고객 회신만(PII 없음)",
+        "킬스위치 SHADOW_CHANNELS · AUTO_SEND=0 · LLM_DAILY_TOKEN_BUDGET · RETENTION_DAYS"
       ]
     }
   ]

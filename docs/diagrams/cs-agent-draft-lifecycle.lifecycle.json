@@ -45,16 +45,6 @@
       "tag": "L1 · L2"
     },
     {
-      "id": "sending",
-      "type": "active",
-      "label": "SENDING",
-      "sublabel": "2분 지나면 확인 필요",
-      "lane": "main",
-      "col": 2,
-      "step": "03",
-      "tag": "멱등키"
-    },
-    {
       "id": "sent",
       "type": "success",
       "label": "SENT",
@@ -71,7 +61,8 @@
       "sublabel": "직접 답장 · 접수 안내",
       "lane": "human",
       "col": 1,
-      "tag": "SENDING 시작"
+      "tag": "바로 발송",
+      "width": 156
     },
     {
       "id": "stale",
@@ -80,7 +71,8 @@
       "sublabel": "NOT_SELECTED 포함",
       "lane": "terminal",
       "col": 0,
-      "tag": "미발송"
+      "tag": "미발송",
+      "width": 144
     },
     {
       "id": "carry",
@@ -106,47 +98,20 @@
       "id": "created-pending",
       "from": "created",
       "to": "pending",
-      "note": "DRAFT · ANSWER_AND_HANDOFF → drafts PENDING insert(seen_out_rowid 기록) · 케이스 AWAITING_APPROVAL. L2 intent 면 기록 뒤 곧바로 agent:auto 가 승인",
+      "note": "DRAFT · ANSWER_AND_HANDOFF → drafts PENDING insert · 케이스 AWAITING_APPROVAL. L2 intent 면 기록 뒤 곧바로 agent:auto 가 승인",
       "variant": "emphasis"
     },
     {
-      "id": "pending-sending",
+      "id": "pending-sent",
       "from": "pending",
-      "to": "sending",
-      "note": "승인 · 수정 승인 · L2 자동 발송(by=agent:auto) — PENDING→SENDING 선점, 0행이면 409 not_pending. 선점 뒤 재확인(종결·새 메시지·이미 답함·human·guard)",
-      "variant": "emphasis"
-    },
-    {
-      "id": "sending-sent",
-      "from": "sending",
       "to": "sent",
-      "note": "mail.send 성공(멱등키), 또는 resolve-sending(sent). 발송 중이거나 2분 전이면 409 sending_in_progress",
+      "label": "승인 → 발송",
       "variant": "emphasis"
     },
     {
-      "id": "sending-fail",
-      "from": "sending",
-      "to": "pending",
-      "label": "실패 · guard 422 · 미발송 확인",
-      "variant": "security",
-      "fromSide": "top",
-      "toSide": "top",
-      "route": "top-channel"
-    },
-    {
-      "id": "sending-recheck",
-      "from": "sending",
-      "to": "stale",
-      "label": "재확인 실패",
-      "variant": "security",
-      "fromSide": "bottom",
-      "toSide": "top",
-      "labelDy": 110
-    },
-    {
-      "id": "human-sending",
+      "id": "human-sent",
       "from": "human_reply",
-      "to": "sending",
+      "to": "sent",
       "label": "직접 답장 · 접수 안내",
       "variant": "dashed",
       "fromSide": "top",
@@ -156,7 +121,7 @@
       "id": "human-fail",
       "from": "human_reply",
       "to": "stale",
-      "label": "실패 → DISCARDED",
+      "label": "발송 안 됨 → DISCARDED",
       "variant": "dashed",
       "fromSide": "bottom",
       "toSide": "top"
@@ -165,7 +130,7 @@
       "id": "pending-stale",
       "from": "pending",
       "to": "stale",
-      "label": "새 메시지 · 폐기 · 인수 · 종결",
+      "label": "새 메시지 · 폐기 · 인수 · 직접 답장 · 종결",
       "variant": "security",
       "fromSide": "bottom",
       "toSide": "left",
@@ -226,20 +191,16 @@
       "dot": "emerald",
       "title": "발송 경로",
       "items": [
-        "승인 = PENDING→SENDING 선점(두 번 눌러도 한 통) 뒤 재확인: 종결·human → NOT_SELECTED, 새 메시지·이미 답함(seen_out_rowid) → STALE, guard 위반 → PENDING(422)",
-        "L2 자동 발송 = 같은 approveDraft 를 by=agent:auto 로(활동 auto_send). 막히거나 발송 실패면 PENDING 으로 남아 사람이 승인(auto_send_failed). AUTO_SEND=0 이면 L2 도 사람 승인",
-        "발송 실패 → PENDING(human 이면 NOT_SELECTED) · 멱등키 draft:<id> 하나에 dispatches 한 행",
-        "SENDING 2분 초과 → 발송 확인 필요 → resolve-sending sent·pending. 발송 중이거나 2분 전이면 409 sending_in_progress",
-        "직접 답장도 drafts 행(action HUMAN_REPLY, 멱등키 human:<id>) → SENDING → SENT · 실패 → DISCARDED",
-        "접수 안내 = 넘김 뒤 drafts 행(action ACK, 멱등키 ack:<id>, approved_by agent:auto) → SENDING → SENT(sent_by=ack, 답으로 안 침) · 실패 → DISCARDED. 케이스당 SENDING·SENT 한 통"
+        "승인 · 수정 승인 → 발송 → SENT(나간 답장은 messages 에)",
+        "L2 = 같은 승인 → 발송을 agent:auto 로(활동 auto_send). 자동 발송이 안 되면 승인 대기로 남는다(auto_send_failed) · AUTO_SEND=0 이면 L2 도 사람 승인",
+        "직접 답장(HUMAN_REPLY)·접수 안내(ACK, agent:auto, 케이스당 한 통, sent_by=ack 는 답으로 안 침)도 drafts 행 → 발송 → SENT"
       ]
     },
     {
       "dot": "slate",
       "title": "발송 없이 종료 · CARRY_OVER",
       "items": [
-        "STALE 새 고객 메시지 · DISCARDED 폐기 · NOT_SELECTED 인수·직접 답장·종결",
-        "회차 도중 종결·인수·새 메시지가 끼면 그 초안은 STALE·NOT_SELECTED 로 기록만(ABORTED)",
+        "STALE 새 고객 메시지 · DISCARDED 폐기 · NOT_SELECTED 인수·직접 답장·종결 · 회차 도중 케이스가 바뀐 초안도 STALE·NOT_SELECTED 로 기록만",
         "STALE 뒤 후속이 IGNORE·SHADOW 로 끝나면 그 초안을 새 PENDING 으로 복사(CARRY_OVER)",
         "SHADOW 는 L0 기록·평가만 · SUPERSEDED 는 스키마 주석의 예약값(코드가 만들지 않음)"
       ]

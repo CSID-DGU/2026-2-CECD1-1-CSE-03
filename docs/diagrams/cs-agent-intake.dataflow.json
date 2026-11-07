@@ -1,0 +1,400 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "CS 응대 에이전트 — 수신 경로와 사람 명령",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "entry",
+        "label": "들어오는 길",
+        "focus": [
+          "imap",
+          "webhook",
+          "form",
+          "sim",
+          "api",
+          "addin"
+        ],
+        "note": "메일은 모두 POST /api/inbound 로 모인다. 시크릿이 맞아야 수신 시각·발신자 인증을 믿는다. 테스트 주입·demo 는 시크릿 없이 접수로 간다."
+      },
+      {
+        "id": "intake-tx",
+        "label": "접수 트랜잭션",
+        "focus": [
+          "addin",
+          "tables",
+          "docs"
+        ],
+        "note": "중복 차단 → 스레드 매칭 → 새 케이스 또는 회신 붙이기 → messages 와 inbound_events 를 한 트랜잭션에 쓴다."
+      },
+      {
+        "id": "after-intake",
+        "label": "접수 뒤",
+        "focus": [
+          "addin",
+          "loop",
+          "tables",
+          "docs",
+          "dash"
+        ],
+        "note": "응답 뒤 회차가 돌고, SSE 가 대시보드를 갱신하며, 나머지 CRM 문서는 지연 flush 가 처리 테이블에서 다시 계산한다."
+      },
+      {
+        "id": "human",
+        "label": "사람 명령",
+        "focus": [
+          "dash",
+          "cmd",
+          "loop",
+          "send"
+        ],
+        "note": "승인·직접 답장은 발송으로, 반환은 즉시 회차로, 폐기·인수·종결은 응대 주체와 상태를 바꾼다."
+      }
+    ],
+    "viewBox": [
+      1068,
+      604
+    ]
+  },
+  "stages": [
+    {
+      "label": "수신 창구"
+    },
+    {
+      "label": "입구"
+    },
+    {
+      "label": "접수"
+    },
+    {
+      "label": "회차 · 기록"
+    },
+    {
+      "label": "사람 · 발송"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "imap",
+      "type": "external",
+      "label": "IMAP 수신 어댑터",
+      "sublabel": "5초 · 읽기 전용",
+      "tag": "inbound-imap",
+      "stage": 0,
+      "row": 0
+    },
+    {
+      "id": "webhook",
+      "type": "cloud",
+      "label": "메일 웹훅",
+      "sublabel": "외부 메일 서비스",
+      "stage": 0,
+      "row": 1
+    },
+    {
+      "id": "form",
+      "type": "external",
+      "label": "문의 폼 메일",
+      "sublabel": "FORM_SENDER_DOMAINS",
+      "stage": 0,
+      "row": 2
+    },
+    {
+      "id": "sim",
+      "type": "external",
+      "label": "테스트 주입 · demo",
+      "sublabel": "/api/test/inbound",
+      "stage": 0,
+      "row": 3
+    },
+    {
+      "id": "api",
+      "type": "security",
+      "label": "POST /api/inbound",
+      "sublabel": "시크릿 · 미러 검사",
+      "tag": "INBOUND_SECRET",
+      "stage": 1,
+      "row": 1
+    },
+    {
+      "id": "addin",
+      "type": "backend",
+      "label": "cases.addInbound",
+      "sublabel": "중복 · 스레드 · 재오픈",
+      "tag": "한 트랜잭션",
+      "stage": 2,
+      "row": 1
+    },
+    {
+      "id": "tables",
+      "type": "database",
+      "label": "처리 테이블",
+      "sublabel": "cases · messages",
+      "tag": "진실",
+      "stage": 3,
+      "row": 1
+    },
+    {
+      "id": "docs",
+      "type": "database",
+      "label": "CRM 컬렉션",
+      "sublabel": "documents 5종",
+      "tag": "투영",
+      "stage": 3,
+      "row": 3
+    },
+    {
+      "id": "loop",
+      "type": "backend",
+      "label": "에이전트 루프",
+      "sublabel": "runCycle",
+      "stage": 3,
+      "row": 0
+    },
+    {
+      "id": "dash",
+      "type": "frontend",
+      "label": "담당자 대시보드",
+      "sublabel": "SSE /api/events",
+      "stage": 4,
+      "row": 1
+    },
+    {
+      "id": "cmd",
+      "type": "frontend",
+      "label": "사람 명령",
+      "sublabel": "POST 명령",
+      "stage": 4,
+      "row": 2
+    },
+    {
+      "id": "send",
+      "type": "external",
+      "label": "발송",
+      "sublabel": "메일 어댑터",
+      "stage": 4,
+      "row": 3
+    }
+  ],
+  "flows": [
+    {
+      "id": "imap-api",
+      "from": "imap",
+      "to": "api",
+      "label": "새 메일",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          315,
+          157
+        ]
+      ],
+      "labelAt": [
+        207,
+        157
+      ]
+    },
+    {
+      "id": "webhook-api",
+      "from": "webhook",
+      "to": "api",
+      "label": "x-inbound-secret",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "id": "form-api",
+      "from": "form",
+      "to": "api",
+      "label": "같은 입구",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          315,
+          385
+        ]
+      ],
+      "labelAt": [
+        215,
+        385
+      ]
+    },
+    {
+      "id": "sim-addin",
+      "from": "sim",
+      "to": "addin",
+      "label": "시크릿 없는 경로",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "bottom",
+      "via": [
+        [
+          530,
+          499
+        ]
+      ],
+      "labelAt": [
+        250,
+        499
+      ]
+    },
+    {
+      "id": "api-addin",
+      "from": "api",
+      "to": "addin",
+      "label": "페이로드",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "id": "addin-tables",
+      "from": "addin",
+      "to": "tables",
+      "label": "새 케이스 | 회신",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "id": "addin-loop",
+      "from": "addin",
+      "to": "loop",
+      "label": "응답 뒤 회차",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "left",
+      "via": [
+        [
+          530,
+          157
+        ]
+      ],
+      "labelAt": [
+        610,
+        157
+      ]
+    },
+    {
+      "id": "loop-tables",
+      "from": "loop",
+      "to": "tables",
+      "label": "판단 · 초안 기록",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        745,
+        214
+      ]
+    },
+    {
+      "id": "tables-docs",
+      "from": "tables",
+      "to": "docs",
+      "label": "CRM 투영",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        745,
+        385
+      ]
+    },
+    {
+      "id": "tables-dash",
+      "from": "tables",
+      "to": "dash",
+      "label": "SSE 이벤트",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "id": "dash-cmd",
+      "from": "dash",
+      "to": "cmd",
+      "label": "담당자 조작",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        960,
+        328
+      ]
+    },
+    {
+      "id": "cmd-send",
+      "from": "cmd",
+      "to": "send",
+      "label": "승인 · 직접 답장",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight",
+      "labelAt": [
+        960,
+        442
+      ]
+    },
+    {
+      "id": "cmd-loop",
+      "from": "cmd",
+      "to": "loop",
+      "label": "반환 · 폐기 · 인수 · 종결",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          1045,
+          385
+        ],
+        [
+          1045,
+          157
+        ]
+      ],
+      "labelAt": [
+        935,
+        157
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "들어오는 길",
+      "items": [
+        "시크릿이 맞는 /api/inbound 만 수신 시각·발신자 인증을 믿는다",
+        "폼 메일은 본문에서 고객 주소를 뽑고 sender_auth=form"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "접수 트랜잭션",
+      "items": [
+        "같은 Message-ID 는 duplicate · 회차 없음",
+        "스레드 id → In-Reply-To·References → 새 케이스 · 종결 케이스는 회신으로 재오픈"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "투영 · 사람",
+      "items": [
+        "처리 테이블이 진실, CRM 문서는 투영",
+        "1차 거르기는 회차의 첫 단계 · 보류·메모는 회차 없음"
+      ]
+    }
+  ]
+}
