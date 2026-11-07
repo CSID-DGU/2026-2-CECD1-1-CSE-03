@@ -16,12 +16,30 @@ const MIGRATIONS = [
   ['loops', 'retry_count', 'INTEGER NOT NULL DEFAULT 0'],
   ['loops', 'retry_message_id', 'TEXT'],
   ['drafts', 'seen_out_rowid', 'INTEGER'],
+  ['messages', 'sender_auth', 'TEXT'],
+  ['cases', 'purged_at', 'TEXT'],
+  ['cases', 'related_case_id', 'TEXT'],
+  ['cases', 'hold_note', 'TEXT'],
+  ['cases', 'held_at', 'TEXT'],
+  ['cases', 'close_reason', 'TEXT'],
+  ['cases', 'close_detail', 'TEXT'],
+  ['messages', 'event_id', 'TEXT'],
 ];
 
-function init(dbPath = process.env.DB_PATH || path.join(__dirname, '..', 'data', 'cs-agent.db')) {
+/** 실제 DB 파일 경로. `:memory:`면 null — 접속기록·수신 상태 파일·정보주체 스크립트가 이 파일의 폴더를 쓴다. */
+function file(env = process.env) {
+  const p = env.DB_PATH || path.join(__dirname, '..', 'data', 'cs-agent.db');
+  return p === ':memory:' ? null : p;
+}
+
+function init(dbPath = file() || ':memory:') {
   if (db) db.close();
   if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   db = new DatabaseSync(dbPath);
+  // 정보주체 스크립트와 서버가 같은 파일에 쓴다 — 잠금을 5초 기다린다(없으면 쓰기가 바로 SQLITE_BUSY). 스키마 실행 전에 건다.
+  if (dbPath !== ':memory:') db.exec('PRAGMA busy_timeout = 5000');
+  // 파기(retention)한 원문이 빈 페이지·셀 자리에 남지 않게 지운 자리를 0으로 덮는다 — 연결마다 걸리는 설정이라 정보주체 스크립트도 여기서 켠다
+  if (dbPath !== ':memory:') db.exec('PRAGMA secure_delete = ON');
   db.exec('PRAGMA foreign_keys = ON');
   if (dbPath !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
   db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
@@ -58,4 +76,4 @@ const saveVersion = (hash, kind, content) => {
   if (hash && content != null) run('INSERT OR IGNORE INTO versions (hash, kind, content, created_at) VALUES (?,?,?,?)', hash, kind, String(content), now());
 };
 
-module.exports = { init, all, get, run, insert, tx, now, uuid, isUnique, saveVersion };
+module.exports = { init, file, all, get, run, insert, tx, now, uuid, isUnique, saveVersion };

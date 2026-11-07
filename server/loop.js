@@ -24,6 +24,8 @@ const RETRY_MINUTES = [2, 5, 10, 30];
 const retryScale = () => Number(process.env.LLM_RETRY_SCALE) || 1;
 const AGENT = () => process.env.AGENT_NAME || 'Aria';
 const DRAFTY = ['DRAFT', 'ANSWER_AND_HANDOFF', 'SHADOW'];
+// LLM에 넣는 현재 고객 메시지 상한(가린 뒤 자른다). 바꿀 일이 없는 값이라 env로 두지 않는다.
+const MAX_INPUT_CHARS = 4000;
 // L2 자동 발송·접수 안내의 행위자. 넘김 사유가 이 목록이면 접수 안내도 보내지 않는다(지시 변경 시도·법적 언급·다른 사람의 회신).
 const AUTO_BY = 'agent:auto';
 const ACK_SKIP = ['injection', 'legal_threat', 'sender_changed'];
@@ -170,26 +172,38 @@ async function cycle(caseId, messageId) {
   }
   cases.setState(caseId, 'AGENT_ACTIVE');
   // ② 맥락 — 이 메시지까지의 고객 메시지 + 지금까지 나간 답장 전부(발송 중 들어온 메시지도 그 답장을 보게)
+  // LLM에는 가린 텍스트만(ASCII 토큰). KB·케이스·1차 거르기·판단 기록 요약·접수 안내 언어 판정은 원문(rawMessage)으로 돈다.
+  const mask = (s) => guard.maskPii(s, { name: c.customer_name, kbText: kb.text, company: process.env.COMPANY_NAME || 'ACME' });
   const history = db.all(`SELECT id, direction, sent_by, edited, body_clean, occurred_at FROM messages
-    WHERE case_id=? AND (rowid <= ? OR direction='out') ORDER BY rowid DESC LIMIT 6`, caseId, msg.rid).reverse();
+    WHERE case_id=? AND (rowid <= ? OR direction='out') ORDER BY rowid DESC LIMIT 6`, caseId, msg.rid).reverse().map((m) => ({ ...m, body_clean: mask(m.body_clean) }));
+  const body = mask(msg.body_clean);
+  // 폼 값은 칸 이름이 라벨이다(여권: M123…) — 칸 이름을 붙여 가린 뒤 뗀다
+  const maskFact = (k, v) => { const s = mask(`${k}: ${v}`); return s.startsWith(`${k}: `) ? s.slice(k.length + 2) : mask(String(v)); };
   const seenOutRowid = lastOutRowid(caseId); // 이 회차가 본 마지막 답장 — 이 뒤로 나간 답장이 있으면 초안은 already_answered
   const loop = db.get('SELECT * FROM loops WHERE case_id=?', caseId);
   const knownFacts = JSON.parse(c.known_facts || '{}');
   const ctx = {
-    caseId, messageId, versions, seenOutRowid, channel: c.channel, pack, kb, case: c, message: msg, history, knownFacts,
-    lastOutboundGist: loop.last_outbound_gist, rounds: loop.rounds,
+    caseId, messageId, versions, seenOutRowid, channel: c.channel, pack, kb, case: c, history, rawMessage: msg,
+    message: { ...msg, body_clean: body.length > MAX_INPUT_CHARS ? `${body.slice(0, MAX_INPUT_CHARS)} [TRUNCATED]` : body },
+    knownFacts: Object.fromEntries(Object.entries(knownFacts).map(([k, v]) => [k, v == null ? v : maskFact(k, v)])),
+    lastOutboundGist: mask(loop.last_outbound_gist), rounds: loop.rounds,
     humanMessages: history.filter((m) => m.direction === 'out' && (m.sent_by === 'human' || m.edited)),
     recentDecisions: db.all("SELECT step, action, reason FROM decisions WHERE case_id=? AND step IN ('gate1','gate2') ORDER BY created_at DESC, rowid DESC LIMIT 3", caseId),
   };
   // ③ 1차 거르기(코드)
-  const pf = prefilter.check({ body: msg.body_clean, subject: msg.subject, sender: msg.sender, pack, autoSubmitted: !!msg.auto_submitted, senderChanged: msg.sender !== c.customer_email });
+  const pf = prefilter.check({
+    body: msg.body_clean, subject: msg.subject, sender: msg.sender, pack, autoSubmitted: !!msg.auto_submitted, senderChanged: msg.sender !== c.customer_email,
+    senderAuth: msg.sender_auth, formUnresolved: policy.isFormAddress(msg.sender),
+  });
   if (pf) {
     const d = pf.action === 'IGNORE' ? pf : { action: 'HANDOFF', reason: policy.normalizeReason(pack, pf.reason) };
     record(caseId, messageId, 'prefilter', 'code', pf, { action: d.action, reason: d.reason, inputSummary: summary, versions });
-    return execute(d, { ...ctx, triage: null });
+    // 인증 실패 메일은 브리핑도 코드로 — 위조 메일 내용을 외부 LLM에 보내지 않는다
+    return execute(d, { ...ctx, triage: null, noLlm: d.reason === 'sender_unverified' });
   }
   // 통과도 남긴다 — 모든 트레이스가 1차 거르기로 시작한다
   record(caseId, messageId, 'prefilter', 'code', { pass: true }, { action: 'PASS', inputSummary: summary, versions });
+  const senderTrusted = policy.senderTrusted(msg.sender_auth, c.customer_email); // 아니면 L2 intent도 승인 대기
   let decision; let extra;
   try {
     // ④ 분류
@@ -199,7 +213,7 @@ async function cycle(caseId, messageId) {
     const repeatStreak = triage.repeatsPrevious ? loop.repeat_streak + 1 : 0;
     db.run('UPDATE loops SET repeat_streak=?, updated_at=? WHERE case_id=?', repeatStreak, db.now(), caseId);
     // ⑤ 판단 1차
-    const d1 = policy.decide({ pack, triage, rounds: loop.rounds, repeatStreak });
+    const d1 = policy.decide({ pack, triage, rounds: loop.rounds, repeatStreak, senderTrusted });
     record(caseId, messageId, 'gate1', 'code', d1, { action: d1.action, reason: d1.reason ?? null, versions });
     if (d1.action !== 'COMPOSE') { decision = d1; extra = { triage }; } else {
       // ⑥ 작성 — 고객 언어의 KB(없으면 한국어 KB를 실제 LLM이 옮긴다)
@@ -233,7 +247,7 @@ async function cycle(caseId, messageId) {
           if (!resp.result.body) { verdict = { pass: false, reasons }; break; }
         }
         // ⑧ 판단 2차
-        decision = policy.decide({ pack, triage, rounds: loop.rounds, repeatStreak, guard: verdict });
+        decision = policy.decide({ pack, triage, rounds: loop.rounds, repeatStreak, guard: verdict, senderTrusted });
         record(caseId, messageId, 'gate2', 'code', decision, { action: decision.action, reason: decision.reason ?? null, versions: rv });
         extra = { triage, body: resp.result.body, usedFacts: resp.result.usedFacts, kb: rkb, versions: rv };
       }
@@ -249,9 +263,11 @@ async function scheduleRetry(e, ctx) {
   const { caseId, messageId } = ctx;
   const loop = db.get('SELECT retry_count, retry_message_id FROM loops WHERE case_id=?', caseId);
   const attempt = (loop.retry_message_id === messageId ? loop.retry_count : 0) + 1;
-  const giveUp = attempt > RETRY_MINUTES.length;
+  // 일일 토큰 예산 초과는 오늘 다시 해도 또 막힌다 — 재시도 없이 바로 사람에게
+  const budget = (e && e.code) === 'llm_budget';
+  const giveUp = budget || attempt > RETRY_MINUTES.length;
   const nextRetryAt = giveUp ? null : new Date(Date.now() + RETRY_MINUTES[attempt - 1] * 60_000 * retryScale()).toISOString();
-  record(caseId, messageId, 'error', 'code', { error: String(e && e.message), attempt, nextRetryAt }, { action: giveUp ? 'HANDOFF' : 'RETRY', reason: 'llm_error', inputSummary: String(ctx.message.body_clean).slice(0, 80), versions: ctx.versions });
+  record(caseId, messageId, 'error', 'code', { error: String(e && e.message), attempt, nextRetryAt, ...(budget ? { budget: true } : {}) }, { action: giveUp ? 'HANDOFF' : 'RETRY', reason: 'llm_error', inputSummary: String(ctx.rawMessage.body_clean).slice(0, 80), versions: ctx.versions });
   if (giveUp) return execute({ action: 'HANDOFF', reason: 'llm_error' }, { ...ctx, triage: null, noLlm: true });
   db.run('UPDATE loops SET next_retry_at=?, retry_count=?, retry_message_id=?, updated_at=? WHERE case_id=?', nextRetryAt, attempt, messageId, db.now(), caseId);
   cases.setState(caseId, 'OPEN'); // 응대 주체는 그대로 에이전트
@@ -387,7 +403,7 @@ async function execute(decision, x) {
   record(caseId, messageId, 'execute', 'code', { action, reason, rule: decision.rule ?? null, autoSend: !!auto, ...(trigger !== messageId ? { trigger } : {}) }, { action, reason, versions });
   // ---- 동기 끝 — 발송은 기록 뒤에(실패해도 판단 기록은 남는다) ----
   if (auto) await autoSend(caseId, auto);
-  if (action === 'HANDOFF') await sendAck(x, reason);
+  if (action === 'HANDOFF' && policy.senderTrusted(x.rawMessage.sender_auth, x.case.customer_email)) await sendAck({ ...x, message: x.rawMessage }, reason);
   return { action, reason, ...(auto ? { autoSend: true } : {}) };
 }
 
@@ -696,8 +712,9 @@ async function reopenCase(caseId, { by }) {
 
 function addNote(caseId, { by, text }) {
   mustCase(caseId);
+  cases.assertNotPurged(caseId);
   if (!text || !String(text).trim()) throw new HttpError(400, 'text 필요');
-  activity(caseId, 'note', by, { text: String(text).trim() });
+  activity(caseId, 'note', by, { text: guard.maskPii(String(text).trim()) }); // 메모에도 고객 식별자를 남기지 않는다
   events.emit('case.updated', { caseId, ...db.get('SELECT state, responder FROM cases WHERE id=?', caseId) });
   return { caseId };
 }
@@ -705,9 +722,10 @@ function addNote(caseId, { by, text }) {
 /** 섀도 초안 평가 — L0 채널의 승격 근거(cases.promotion). */
 function rateShadow(draftId, { by, rating, note }) {
   const d = mustDraft(draftId);
+  cases.assertNotPurged(d.case_id);
   if (d.status !== 'SHADOW') throw new HttpError(409, 'not_shadow', { status: d.status });
   if (!['good', 'needs_edit', 'critical'].includes(rating)) throw new HttpError(400, 'rating은 good | needs_edit | critical');
-  activity(d.case_id, 'shadow_rating', by, { draftId, rating, note: note ? String(note).slice(0, 500) : null });
+  activity(d.case_id, 'shadow_rating', by, { draftId, rating, note: note ? guard.maskPii(String(note)).slice(0, 500) : null });
   events.emit('draft.updated', { caseId: d.case_id, draftId, status: 'SHADOW' });
   return { draftId, rating };
 }
