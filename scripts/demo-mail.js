@@ -219,6 +219,7 @@ async function main() {
     AUTO_SEND: '1', LLM_MOCK_DELAY_MS: '700', ...process.env, // AUTO_SEND=0 을 주면 그대로 꺼진다(킬 스위치)
     // 셸에 남은 실계정·운영 설정이 데모를 망치지 않게 비운다(빈 값 = 끔)
     SMTP_SECURE: '', AUTH_USER_HEADER: '', PROXY_SHARED_SECRET: '', NOTIFY_WEBHOOK_URL: '',
+    NODE_ENV: '', REQUIRE_SENDER_AUTH: '', IMAP_MODE: '', IMAP_AUTHSERV_ID: '', FORM_SENDER_DOMAINS: '', LLM_DAILY_TOKEN_BUDGET: '', RETENTION_DAYS: '',
     HOST: '127.0.0.1', PORT: String(PORT), SIM_URL: `${APP}`, DB_PATH: path.join(tmp, 'demo.db'), INBOUND_SECRET: SECRET,
     MAIL_PROVIDER: 'smtp', MAIL_ALLOWED_DOMAINS: CUSTOMER.email.split('@')[1], SMTP_HOST: '127.0.0.1', SMTP_PORT: String(smtpPort), SMTP_ALLOW_PLAIN: '1',
     SMTP_USER: SUPPORT, SMTP_PASS: PASS, SMTP_FROM: `ACME 고객지원 <${SUPPORT}>`,
@@ -230,8 +231,8 @@ async function main() {
   await imap.waitFor(/연결/);
 
   await firstExamine;
-  const health = await (await fetch(`${APP}/api/health`)).json();
-  console.log(`\n[demo] 준비 완료 — llm=${health.provider.llm} mail=smtp(가짜 메일 서버)\n  고객 메일함  http://127.0.0.1:${BOX_PORT}\n  백오피스     ${APP}\n  Ctrl+C 로 종료(임시 DB·인증서 삭제)\n`);
+  const status = await (await fetch(`${APP}/api/status`)).json();
+  console.log(`\n[demo] 준비 완료 — llm=${status.provider.llm} mail=smtp(가짜 메일 서버)\n  고객 메일함  http://127.0.0.1:${BOX_PORT}\n  백오피스     ${APP}\n  Ctrl+C 로 종료(임시 DB·인증서 삭제)\n`);
   if (CHECK) stop((await check()) ? 0 : 1);
 }
 

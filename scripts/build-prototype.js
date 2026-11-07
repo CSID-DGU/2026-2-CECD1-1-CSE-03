@@ -3,13 +3,15 @@
 // 실제 서버 코드(:memory: DB, mock LLM, mock 메일)로 합성 문의를 돌려 대시보드 초기 상태와 "앞으로 올 문의" 녹화를 만들고,
 // web/ 대시보드 + 브라우저 안 백엔드 심(fetch·EventSource)을 HTML 파일 하나로 묶는다 → dist/cs-agent-prototype.html.
 // server/·web/ 파일은 빌드할 때마다 새로 읽는다 — 다시 돌리면 그쪽 수정이 그대로 들어간다.
-// 끝에서 심의 조회(목록·통계·상세)와 사람 행동(승인·폐기·인수·반환…)을 실제 서버 결과와 대조한다. 어긋나면 exit 1.
+// 끝에서 심의 조회(목록·통계·상세)와 사람 행동(승인·폐기·인수·반환…)을 실제 서버 결과와 대조한다. 어긋나거나 결과 HTML에 금지어(FORBIDDEN)가 남으면 exit 1.
 const fs = require('node:fs');
 const path = require('node:path');
 
 Object.assign(process.env, { LLM_PROVIDER: 'mock', MAIL_PROVIDER: 'mock', MAIL_MOCK_LOG: '0' });
 delete process.env.CS_ABLATE; // 비교 실험 스위치는 프로토타입 대조에 쓰지 않는다
-for (const k of ['AUTO_SEND', 'SHADOW_CHANNELS', 'INBOUND_SECRET', 'AUTH_USER_HEADER', 'NODE_ENV', 'LLM_MOCK_DELAY_MS', 'MAIL_MOCK_FAIL', 'MAIL_MOCK_DELAY_MS', 'INTERNAL_DOMAINS', 'ENABLE_TEST_INJECT']) delete process.env[k];
+// 판단·발송·지표를 바꾸는 설정은 지운다 — 셸에 남은 값이 프로토타입을 바꾸지 않게(같은 코드 = 같은 결과)
+for (const k of ['AUTO_SEND', 'SHADOW_CHANNELS', 'INBOUND_SECRET', 'AUTH_USER_HEADER', 'NODE_ENV', 'LLM_MOCK_DELAY_MS', 'MAIL_MOCK_FAIL', 'MAIL_MOCK_DELAY_MS', 'INTERNAL_DOMAINS', 'ENABLE_TEST_INJECT',
+  'REQUIRE_SENDER_AUTH', 'FORM_SENDER_DOMAINS', 'LLM_DAILY_TOKEN_BUDGET', 'LLM_PRICE_INPUT_PER_MTOK', 'LLM_PRICE_OUTPUT_PER_MTOK', 'RETENTION_DAYS', 'AUTO_CLOSE_DAYS', 'LLM_RETRY_SCALE']) delete process.env[k];
 
 // 가상 시계 — 합성 문의가 몇 시간에 걸쳐 들어온 것처럼 타임스탬프를 벌린다. 서버 모듈을 읽기 전에 건다.
 const RealDate = Date;
@@ -27,6 +29,7 @@ const db = require('../server/db');
 const llm = require('../server/llm');
 const cases = require('../server/cases');
 const loop = require('../server/loop');
+const store = require('../server/store');
 const events = require('../server/events');
 const policy = require('../server/policy');
 const kbLoader = require('../server/kb');
@@ -35,9 +38,26 @@ const llmMock = require('../server/llm/mock');
 const { createServer } = require('../server/index');
 const INQ = require('../server/mock/inquiries');
 
-// 브라우저로 그대로 묶는 서버 모듈(순수 JS). node:crypto와 agents/common은 심이 대신한다.
-const BUNDLE = ['guard', 'labels', 'mail/index', 'mail/mock', 'prefilter', 'llm/mock', 'agents/briefer'];
+// 브라우저로 그대로 묶는 서버 모듈(순수 JS). node:crypto·agents/common·mail/mock은 심이 대신한다.
+const BUNDLE = ['guard', 'labels', 'mail/index', 'prefilter', 'llm/mock', 'agents/briefer', 'crm'];
 const COMMON_STUB = "module.exports = { persona: () => '', factsBlock: () => '', historyBlock: () => '', decisionsBlock: () => '', promptSource: () => '', call: () => { throw new Error('프로토타입: LLM 호출 없음'); } };";
+// 프로토타입 발송 — 아무 데도 안 보내고 메시지 id만 돌려준다.
+const MAIL_STUB = "const { randomUUID } = require('node:crypto'); module.exports = { send: async () => ({ id: 'mock:' + randomUUID(), provider: 'mock' }) };";
+// 공개 프로토타입에 싣지 않는 초안 칸 — 녹화 데이터에서 빼고, 심 대조도 양쪽에서 이 칸만 빼고 본다.
+const HIDDEN_KEYS = ['idempotency_key', 'seen_out_rowid', 'needsSendCheck', 'sendingDraft'];
+const hideKeys = (k, v) => (HIDDEN_KEYS.includes(k) ? undefined : v); // JSON.stringify replacer — 키 순서는 그대로
+// 프로토타입에선 나오지 않는 화면 문구·칸을 묶기 전에 뺀다 — [정규식(g), 기대 개수]. 개수가 다르면(원본이 바뀌면) 빌드를 멈춘다.
+const LABEL_RE = /\s*\b(?:send_unconfirmed|resolve_sending): '[^']*',/g;
+const CUTS = {
+  'web/app.js': [[/\s*\balready_answered: '[^']*',/g, 2], [/\n\s*SENDING: '[^']*',/g, 1], [/\n\s*sending(?:_in_progress)?: '[^']*',/g, 2], [LABEL_RE, 2],
+    [/,\s*actions\.has\('resolve_sending'\) && d\.sendingDraft \? sendCheckPanel\(d\.sendingDraft\) : null/g, 1], [/\nfunction sendCheckPanel\(sd\) \{[\s\S]*?\n\}\n/g, 1]],
+  'web/style.css': [[/\n\.send-check \{[^}]*\}/g, 1]],
+  'server/crm.js': [[/, 'resolve_sending'/g, 2], [LABEL_RE, 2], [/\n\s*if \(sendingDraft\?\.needsSendCheck\)[^\n]*/g, 1], [/\n\s*const xd = sendingDraft[^\n]*/g, 1],
+    [/, sendingDraft\b(?: = null|: xd(?: \|\| null)?)?/g, 4]],
+};
+// 빌드 끝 검사: 결과 HTML에 남으면 안 되는 말
+const FORBIDDEN = [/seen_?out/i, /already_?answered/i, /idempoten/i, /멱등/, /SENDING/, /answered_?since/i, /last_?out_?rowid/i, /선점/,
+  /needs_?send_?check/i, /sending_?draft/i, /resolve[-_]?sending/i, /send_?unconfirmed/i, /sending_in_progress/, /send[-_]?check/i, /발송 중/];
 
 // 그 외 합성 문의(전부 가공). 새 문의 주입 폼이 고른 채널·문장에 맞는 녹화를 찾을 수 있게 채널별 유형을 채운다.
 const EXTRA = [
@@ -69,7 +89,6 @@ function protoSig(q, pack, kb, prefilter, mock) {
 /** 인메모리 백엔드 — server/cases.js(조회)·server/loop.js(사람 행동)를 옮긴 것. guard·메일 템플릿·브리핑은 서버 모듈을 그대로 쓴다. */
 function protoCore(DATA, req, hooks) {
   const guard = req('guard'); const mail = req('mail/index'); const briefer = req('agents/briefer');
-  const SEND_CHECK_MS = 2 * 60 * 1000;
   const now = () => new Date().toISOString();
   const uuid = () => (globalThis.crypto && globalThis.crypto.randomUUID ? globalThis.crypto.randomUUID()
     : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (ch) => { const r = (Math.random() * 16) | 0; return (ch === 'x' ? r : (r & 3) | 8).toString(16); }));
@@ -89,11 +108,11 @@ function protoCore(DATA, req, hooks) {
 
   const store = new Map(); // caseId → 상세(파생 필드 뺀 원본). 넣은 순서 = rowid
   for (const d of DATA.cases) {
-    const x = clone(d); delete x.needsSendCheck;
-    for (const dr of x.drafts) { delete dr.preview; delete dr.kbPassages; delete dr.needs_send_check; }
+    const x = clone(d);
+    for (const dr of x.drafts) { delete dr.preview; delete dr.kbPassages; }
     store.set(x.case.id, x);
   }
-  // 메시지 rowid(도착 순서). seen_out_rowid와 비교한다 — 서버 rowid를 그대로 가져오고 새 메시지는 그 뒤 번호.
+  // 메시지 rowid(도착 순서). 반환 때 아직 답하지 않은 메시지를 찾는다 — 서버 rowid를 그대로 가져오고 새 메시지는 그 뒤 번호.
   const rowid = new Map(Object.entries(DATA.rowids || {}));
   let maxRow = Math.max(0, ...rowid.values(), ...[...(DATA.pool || []), ...(DATA.followups || [])].flatMap((r) => Object.values(r.rowids || {})));
   const rid = (m) => rowid.get(m.id) ?? 0;
@@ -108,16 +127,14 @@ function protoCore(DATA, req, hooks) {
   function getCase(id) {
     const raw = store.get(id); if (!raw) return null;
     const d = clone(raw); const c = d.case;
-    const old = Date.now() - SEND_CHECK_MS;
     for (const x of d.drafts) {
       if (x.status === 'PENDING') {
         const kb = kbOf(c.channel, mail.langOf(x.original_body));
         x.preview = mail.renderAgent({ name: c.customer_name, body: x.original_body });
         x.kbPassages = Object.fromEntries((x.used_facts || []).map((k) => [k, kb.sections[k] ? kb.sections[k].text : '(KB에 없음 — 기한 지남 또는 삭제)']));
       }
-      if (x.status === 'SENDING' && x.approved_at && Date.parse(x.approved_at) < old) x.needs_send_check = true;
     }
-    return { case: c, threadIds: d.threadIds, messages: d.messages, drafts: d.drafts, needsSendCheck: d.drafts.some((x) => x.needs_send_check),
+    return { case: c, threadIds: d.threadIds, messages: d.messages, drafts: d.drafts,
       decisions: d.decisions, handoffs: d.handoffs, activities: d.activities, loop: d.loop };
   }
   const lastBy = (arr, key) => arr.reduce((b, x, i) => (!b || x[key] > b.x[key] || (x[key] === b.x[key] && i > b.i) ? { x, i } : b), null)?.x || null;
@@ -208,7 +225,6 @@ function protoCore(DATA, req, hooks) {
   const mustDraft = (id) => { for (const d of store.values()) { const x = d.drafts.find((y) => y.id === id); if (x) { touch(d.case.id); return [d, x]; } } return fail(404, 'draft 없음'); };
   const idx = (d, mid) => d.messages.findIndex((m) => m.id === mid); // 도착 순서(rowid) 대용
   const hasPending = (d) => d.drafts.some((x) => x.status === 'PENDING');
-  const hasSending = (d) => d.drafts.some((x) => x.status === 'SENDING');
   const restingState = (d) => (hasPending(d) ? 'AWAITING_APPROVAL' : d.messages.some((m) => m.direction === 'out') ? 'WAITING_CUSTOMER' : 'OPEN');
   function setState(d, state, patch = {}) {
     Object.assign(d.case, { state, updated_at: now() }, patch);
@@ -220,14 +236,13 @@ function protoCore(DATA, req, hooks) {
   }
   const loopSet = (d, patch) => Object.assign(d.loop, patch, { updated_at: now() });
   const activity = (d, type, actor, payload) => d.activities.push({ id: uuid(), case_id: d.case.id, type, actor, payload: payload ? clone(payload) : null, created_at: now() });
-  const assertNotSending = (d) => { if (hasSending(d)) fail(409, 'sending'); };
   function notSelectPending(d) {
     for (const x of d.drafts) if (x.status === 'PENDING') { x.status = 'NOT_SELECTED'; emit('draft.updated', { caseId: d.case.id, draftId: x.id, status: 'NOT_SELECTED' }); }
   }
   const draftRow = (o) => ({
     id: o.id, case_id: o.case_id, trigger_message_id: o.trigger_message_id, status: o.status, intent: o.intent ?? null, action: o.action ?? null, original_body: o.original_body,
-    final_body: null, edited_by: null, edit_tags: null, used_facts: o.used_facts ?? [], idempotency_key: o.idempotency_key, approved_by: o.approved_by ?? null,
-    approved_at: o.approved_at ?? null, sent_at: null, error: null, seen_out_rowid: o.seen_out_rowid ?? null, created_at: o.created_at,
+    final_body: null, edited_by: null, edit_tags: null, used_facts: o.used_facts ?? [], approved_by: o.approved_by ?? null,
+    approved_at: o.approved_at ?? null, sent_at: null, error: null, created_at: o.created_at,
   });
   function saveHandoff(d, reason, briefing, before) {
     const id = uuid();
@@ -250,15 +265,13 @@ function protoCore(DATA, req, hooks) {
     return all.filter((v) => { const k = `${v.code}|${v.quote}`; if (seen.has(k)) return false; seen.add(k); return true; });
   }
   const newerInbound = (d, mid) => { const i = idx(d, mid); return d.messages.some((m, j) => m.direction === 'in' && j > i); };
-  const lastOutRowid = (d) => Math.max(0, ...d.messages.filter(answerOut).map(rid));
-  const answeredSince = (d, x) => d.messages.some((m) => answerOut(m) && rid(m) > (x.seen_out_rowid ?? 0));
   function finalizeSent(x, d, { body, rendered, by, sentBy, edited, editTags, activityType, provider, providerMessageId, expiredFacts }) {
     const t = now(); const messageId = uuid(); const dispatchId = uuid();
     Object.assign(x, { status: 'SENT', approved_by: x.approved_by ?? by, approved_at: x.approved_at ?? t, sent_at: t, error: null });
     const tid = d.messages.find((m) => m.id === x.trigger_message_id)?.thread_id || d.threadIds[0];
     newRow(messageId);
     d.messages.push({ id: messageId, case_id: d.case.id, thread_id: tid, direction: 'out', sent_by: sentBy, sender: sentBy === 'human' ? by : `${AGENT()} (agent)`,
-      subject: `Re: ${d.case.subject || '문의'}`, body: rendered, body_clean: body, provider_message_id: providerMessageId, occurred_at: t, auto_submitted: 0, edited: edited ? 1 : 0 });
+      subject: `Re: ${d.case.subject || '문의'}`, body: rendered, body_clean: body, provider_message_id: providerMessageId, occurred_at: t, auto_submitted: 0, edited: edited ? 1 : 0, sender_auth: null, event_id: null });
     if (sentBy !== 'ack') Object.assign(d.loop, { rounds: d.loop.rounds + (sentBy === 'agent' ? 1 : 0), last_outbound_gist: body.slice(0, 300), updated_at: t });
     activity(d, activityType, by, { draftId: x.id, editTags: editTags || [], ...(expiredFacts && expiredFacts.length ? { expiredFacts } : {}) });
     if (sentBy === 'human') setState(d, 'WAITING_CUSTOMER', { assignee: by });
@@ -273,25 +286,21 @@ function protoCore(DATA, req, hooks) {
   }
   async function deliver(x, d, opts) {
     let sent;
-    try { sent = await mail.send({ to: d.case.customer_email, subject: `Re: ${d.case.subject || '문의'}`, body: opts.rendered, idempotencyKey: x.idempotency_key }); }
+    try { sent = await mail.send({ to: d.case.customer_email, subject: `Re: ${d.case.subject || '문의'}`, body: opts.rendered }); }
     catch (e) { opts.onFail(String(e.message)); fail(502, 'send_failed', { detail: e.message }); }
     return finalizeSent(x, d, { ...opts, provider: sent.provider, providerMessageId: sent.id });
   }
   async function approveDraft(draftId, { by, finalBody, editTags }) {
     const [d, x] = mustDraft(draftId);
     if (x.action === 'HUMAN_REPLY' || x.status !== 'PENDING') fail(409, 'not_pending', { status: x.status });
-    Object.assign(x, { status: 'SENDING', approved_by: by, approved_at: now() });
     const back = (status, error) => {
       Object.assign(x, { status, approved_by: null, approved_at: null, final_body: null, edited_by: null, edit_tags: null }); if (error != null) x.error = error;
       emit('draft.updated', { caseId: d.case.id, draftId, status }); settle(d);
     };
     if (d.case.state === 'CLOSED') { back('NOT_SELECTED'); fail(409, 'closed'); }
     if (newerInbound(d, x.trigger_message_id)) { back('STALE'); fail(409, 'stale'); }
-    // 단순화: already_answered 뒤 서버는 그 메시지를 다시 판단한다 — 여기선 STALE만. 승인 경쟁이 없는 프로토타입에선 거의 안 난다.
-    if (answeredSince(d, x)) { back('STALE'); fail(409, 'already_answered'); }
     if (d.case.responder === 'human') { back('NOT_SELECTED'); fail(409, 'responder_human'); }
-    if (d.drafts.some((o) => o !== x && o.status === 'SENDING')) { back('PENDING'); fail(409, 'sending'); }
-    if (by === AUTO_BY && !(autoAllowed(packOf(d.case.channel)) && packOf(d.case.channel).intents[x.intent]?.level === 'L2')) { back('PENDING'); fail(409, 'auto_not_allowed'); }
+    if (by === AUTO_BY && !(autoAllowed(packOf(d.case.channel)) && packOf(d.case.channel).intents[x.intent]?.level === 'L2')) fail(409, 'auto_not_allowed');
     const body = typeof finalBody === 'string' && finalBody.trim() ? finalBody.trim() : x.original_body;
     const edited = body !== x.original_body;
     const pack = packOf(d.case.channel); const kb = kbOf(d.case.channel, mail.langOf(body));
@@ -300,7 +309,7 @@ function protoCore(DATA, req, hooks) {
     const expiredFacts = edited ? used.filter((k) => !kb.sections[k]) : [];
     const violations = agentViolations({ body, usedFacts: used.filter((k) => !expiredFacts.includes(k)), pack, kb, rendered, intent: edited ? null : x.intent });
     if (by === AUTO_BY) violations.push(...autoSubjectViolations(d, pack, kb));
-    if (violations.length) { back('PENDING'); fail(422, 'guard', { violations }); }
+    if (violations.length) fail(422, 'guard', { violations });
     if (edited) Object.assign(x, { final_body: body, edited_by: by, edit_tags: clone(editTags || []) });
     return deliver(x, d, { body, rendered, by, sentBy: 'agent', edited, editTags, expiredFacts, activityType: by === AUTO_BY ? 'auto_send' : edited ? 'edit_approve' : 'approve',
       onFail: (err) => back(d.case.responder === 'human' ? 'NOT_SELECTED' : 'PENDING', err) });
@@ -309,7 +318,6 @@ function protoCore(DATA, req, hooks) {
     const d = mustCase(caseId);
     const text = String(body || '').trim();
     if (!text) fail(400, 'body 필요');
-    assertNotSending(d);
     const pack = packOf(d.case.channel); const kb = kbOf(d.case.channel, mail.langOf(text));
     const rendered = mail.renderHuman({ name: d.case.customer_name, by, body: text });
     const violations = guard.check({ body: rendered, pack, kb, only: ['empty', 'unresolved_slot'], human: true });
@@ -320,30 +328,12 @@ function protoCore(DATA, req, hooks) {
     d.case.assignee = by;
     const trigger = [...d.messages].reverse().find((m) => m.direction === 'in')?.id ?? null;
     const id = uuid(); const t = now();
-    const x = draftRow({ id, case_id: d.case.id, trigger_message_id: trigger, status: 'SENDING', intent: null, action: 'HUMAN_REPLY', original_body: text,
-      used_facts: [], idempotency_key: `human:${id}`, approved_by: by, approved_at: t, created_at: t });
+    const x = draftRow({ id, case_id: d.case.id, trigger_message_id: trigger, status: 'SENT', intent: null, action: 'HUMAN_REPLY', original_body: text,
+      used_facts: [], approved_by: by, approved_at: t, created_at: t });
     d.drafts.push(x);
-    emit('draft.created', { caseId: d.case.id, draftId: id, status: 'SENDING' });
+    emit('draft.created', { caseId: d.case.id, draftId: id, status: 'SENT' });
     return deliver(x, d, { body: text, rendered, by, sentBy: 'human', edited: false, activityType: 'human_reply',
       onFail: (err) => { Object.assign(x, { status: 'DISCARDED', error: err }); emit('draft.updated', { caseId: d.case.id, draftId: id, status: 'DISCARDED' }); } });
-  }
-  function resolveSending(draftId, { by, outcome }) {
-    const [d, x] = mustDraft(draftId);
-    if (x.status !== 'SENDING') fail(409, 'not_sending', { status: x.status });
-    if (x.approved_at && Date.parse(x.approved_at) > Date.now() - SEND_CHECK_MS) fail(409, 'sending_in_progress');
-    if (outcome === 'sent') {
-      const human = x.action === 'HUMAN_REPLY'; const body = x.final_body || x.original_body;
-      const rendered = human ? mail.renderHuman({ name: d.case.customer_name, by: x.approved_by || by, body }) : mail.renderAgent({ name: d.case.customer_name, body, auto: x.approved_by === AUTO_BY });
-      return finalizeSent(x, d, { body, rendered, by: human ? x.approved_by || by : by, sentBy: human ? 'human' : x.action === 'ACK' ? 'ack' : 'agent', edited: !!x.final_body, editTags: x.edit_tags || [],
-        activityType: 'resolve_sending', provider: 'manual', providerMessageId: null });
-    }
-    if (outcome !== 'pending') fail(400, 'outcome은 sent | pending');
-    const status = ['HUMAN_REPLY', 'ACK'].includes(x.action) ? 'DISCARDED' : d.case.responder === 'human' ? 'NOT_SELECTED' : 'PENDING';
-    Object.assign(x, { status, approved_by: null, approved_at: null });
-    activity(d, 'resolve_sending', by, { draftId, outcome });
-    emit('draft.updated', { caseId: d.case.id, draftId, status });
-    if (status === 'PENDING' && d.case.state !== 'CLOSED') setState(d, 'AWAITING_APPROVAL'); else settle(d);
-    return { draftId, status };
   }
 
   /* ---- 사람 행동 (loop.js) ---- */
@@ -362,7 +352,6 @@ function protoCore(DATA, req, hooks) {
   }
   function takeover(caseId, { by }) {
     const d = mustCase(caseId);
-    assertNotSending(d);
     setResponder(d, 'human', { by, reason: 'takeover' });
     loopSet(d, { state: 'HANDED_OFF' });
     notSelectPending(d);
@@ -406,7 +395,6 @@ function protoCore(DATA, req, hooks) {
     const resp = [...rows].reverse().find((r) => r.step === 'respond')?.output || null;
     const briefRow = rows.find((r) => r.step === 'brief');
     setState(d, 'AGENT_ACTIVE');
-    const seenOut = lastOutRowid(d);
     for (const r of rows) {
       if (r.step === 'brief' || r.step === 'execute') continue;
       replayRow(d, r, mid);
@@ -426,7 +414,7 @@ function protoCore(DATA, req, hooks) {
     const insertDraft = (status) => {
       const id = uuid();
       d.drafts.push(draftRow({ id, case_id: caseId, trigger_message_id: mid, status, intent: tri ? tri.intent : null, action, original_body: resp ? resp.body : null,
-        used_facts: (resp && resp.usedFacts) || [], idempotency_key: `draft:${id}`, seen_out_rowid: seenOut, created_at: now() }));
+        used_facts: (resp && resp.usedFacts) || [], created_at: now() }));
       emit('draft.created', { caseId, draftId: id, status });
       return id;
     };
@@ -453,7 +441,7 @@ function protoCore(DATA, req, hooks) {
   async function sendAck(d, mid, reason) {
     const pack = packOf(d.case.channel);
     if (!pack.ackReply || !autoAllowed(pack) || ACK_SKIP.includes(reason)) return;
-    if (d.drafts.some((x) => x.action === 'ACK' && ['SENDING', 'SENT'].includes(x.status))) return;
+    if (d.drafts.some((x) => x.action === 'ACK' && x.status === 'SENT')) return;
     const message = d.messages.find((m) => m.id === mid);
     const body = pack.ackReply[mail.langOf(message && message.body_clean)] || pack.ackReply.ko;
     const rendered = mail.renderAgent({ name: d.case.customer_name, body, auto: true });
@@ -462,16 +450,16 @@ function protoCore(DATA, req, hooks) {
       activity(d, 'auto_send_failed', AUTO_BY, { ack: true, error: 'guard' }); return;
     }
     const id = uuid(); const t = now();
-    const x = draftRow({ id, case_id: d.case.id, trigger_message_id: mid, status: 'SENDING', intent: null, action: 'ACK', original_body: body,
-      used_facts: [], idempotency_key: `ack:${id}`, approved_by: AUTO_BY, approved_at: t, created_at: t });
+    const x = draftRow({ id, case_id: d.case.id, trigger_message_id: mid, status: 'SENT', intent: null, action: 'ACK', original_body: body,
+      used_facts: [], approved_by: AUTO_BY, approved_at: t, created_at: t });
     d.drafts.push(x);
-    emit('draft.created', { caseId: d.case.id, draftId: id, status: 'SENDING' });
+    emit('draft.created', { caseId: d.case.id, draftId: id, status: 'SENT' });
     try {
       await deliver(x, d, { body, rendered, by: AUTO_BY, sentBy: 'ack', edited: false, activityType: 'auto_ack',
         onFail: (err) => { Object.assign(x, { status: 'DISCARDED', error: err }); emit('draft.updated', { caseId: d.case.id, draftId: id, status: 'DISCARDED' }); } });
     } catch { /* onFail이 기록했다 */ }
   }
-  const lastUnanswered = (d) => { const lo = lastOutRowid(d); return [...d.messages].reverse().find((m) => m.direction === 'in' && rid(m) > lo) || null; };
+  const lastUnanswered = (d) => { const lo = Math.max(0, ...d.messages.filter(answerOut).map(rid)); return [...d.messages].reverse().find((m) => m.direction === 'in' && rid(m) > lo) || null; };
   async function returnToAgent(caseId, { by }) {
     if (playing.has(caseId) && lastUnanswered(store.get(caseId))) fail(409, 'busy'); // 그 메시지 회차가 아직 도는 중
     const d = mustCase(caseId);
@@ -488,25 +476,19 @@ function protoCore(DATA, req, hooks) {
       return { caseId, cycled: true, result: await replayCycle(d, pending.id), queued: 0 };
     } finally { const b = buf; buf = null; hooks.stagger(b); }
   }
+  /** 반환 — 보류 중이면 먼저 풀고, 반환이 거절되면(409 등) 보류를 되돌린다(index.js returnCase). */
+  async function returnCase(caseId, b) {
+    const d = store.get(caseId) || fail(404, 'case 없음');
+    const held = d.case.held_at ? { held_at: d.case.held_at, hold_note: d.case.hold_note } : null;
+    if (held) Object.assign(d.case, { held_at: null, hold_note: null });
+    try { return await returnToAgent(caseId, b); } catch (e) { if (held) Object.assign(d.case, held); throw e; }
+  }
   function closeCase(caseId, { by }) {
     const d = mustCase(caseId);
-    assertNotSending(d); notSelectPending(d);
+    notSelectPending(d);
     setState(d, 'CLOSED', { closed_at: now() });
     activity(d, 'close', by);
     return { caseId, state: 'CLOSED' };
-  }
-  async function reopenCase(caseId, { by }) {
-    const d = mustCase(caseId);
-    if (d.case.state !== 'CLOSED') fail(409, 'not_closed', { state: d.case.state });
-    buf = [];
-    try {
-      setState(d, 'OPEN', { closed_at: null });
-      activity(d, 'reopen', by);
-      const last = d.messages[d.messages.length - 1];
-      if (last && last.direction === 'in') { const result = await replayCycle(d, last.id); return { caseId, cycled: true, result, queued: 0, state: d.case.state }; }
-      setState(d, restingState(d));
-      return { caseId, cycled: false, state: restingState(d) };
-    } finally { const b = buf; buf = null; hooks.stagger(b); }
   }
   function addNote(caseId, { by, text }) {
     const d = mustCase(caseId);
@@ -522,6 +504,109 @@ function protoCore(DATA, req, hooks) {
     activity(d, 'shadow_rating', by, { draftId, rating, note: note ? String(note).slice(0, 500) : null });
     emit('draft.updated', { caseId: d.case.id, draftId, status: 'SHADOW' });
     return { draftId, rating };
+  }
+
+  /* ---- CRM 컬렉션 (server/collections.js syncCase·index.js /api/crm/*) ----
+   * 스냅숏 문서에서 시작해, 읽을 때마다 지금 store로 crm.projectCase(직전 문서 = prev)를 다시 부른다 — 바뀌었으면 revision+1.
+   * 문의자·고객사·수신 이벤트는 새 케이스(녹화 재생)에만 만든다. 종결 후 회신 경로는 녹화에 없어 재현하지 않는다. */
+  const crm = req('crm');
+  const docs = { cases: new Map(), contacts: new Map(), companies: new Map(), events: new Map() };
+  for (const k of Object.keys(docs)) for (const [id, x] of Object.entries(DATA.crm[k])) docs[k].set(id, clone(x));
+  let caseNo = Math.max(0, ...[...docs.cases.values()].map((x) => Number(x.doc.caseNumber)));
+  const INTAKE = { type: 'system', id: 'intake' };
+  /** 문의자·업무 도메인 고객사 찾기/만들기(collections.js link, 새 케이스 몫만). */
+  function crmLink(c, firstEventId) {
+    const email = crm.contactKey(c.customer_email);
+    if (!email || c.purged_at) return { contactId: null, companyId: null };
+    const domain = crm.companyDomain(email, {});
+    const audit = { createdAt: c.created_at, createdBy: { ...INTAKE }, updatedAt: c.created_at, updatedBy: { ...INTAKE } };
+    let co = domain ? [...docs.companies.values()].find((x) => x.primaryDomain === domain) : null;
+    if (domain && !co) {
+      const name = (c.known_facts && c.known_facts.회사) || domain;
+      co = { id: uuid(), type: 'unknown', primaryDomain: domain, canonicalName: name, normalizedName: name.toLowerCase(), aliases: [], domains: [{ value: domain, status: 'observed' }], lifecycleStatus: 'active', audit };
+      docs.companies.set(co.id, co);
+    }
+    let p = [...docs.contacts.values()].find((x) => x.primaryEmail === email);
+    if (!p) {
+      p = { id: uuid(), companyId: co ? co.id : null, type: 'person', primaryEmail: email, emails: [{ value: email, normalizedValue: email, kind: 'observed', verified: false, firstObservedAt: c.created_at, lastObservedAt: c.created_at }],
+        current: { name: { value: c.customer_name && c.customer_name !== '고객' ? c.customer_name : null, observedAt: c.created_at, sourceEventId: firstEventId, confidence: 1, manuallyVerified: false } }, lifecycleStatus: 'active', audit };
+      docs.contacts.set(p.id, p);
+    }
+    return { contactId: p.id, companyId: p.companyId ?? (co ? co.id : null) };
+  }
+  function crmCtx(d) {
+    const ins = d.messages.filter((m) => m.direction === 'in');
+    for (const [i, m] of ins.entries()) { // 녹화 재생으로 들어온 수신 메일 — 이벤트 문서(collections.js ingest)
+      if (m.event_id && !docs.events.has(m.event_id)) {
+        docs.events.set(m.event_id, crm.eventFromMessage(m, d.case, { sourceType: m.sender_auth === 'form' ? 'customer_support_form' : i ? 'email_reply' : 'email_inbound', method: i ? 'thread' : 'new_case' }));
+      }
+    }
+    const ev = (mid) => docs.events.get(d.messages.find((m) => m.id === mid)?.event_id) || null;
+    const prev = docs.cases.get(d.case.id);
+    const link = prev ? { contactId: prev.doc.contactId, companyId: prev.doc.companyId } : crmLink(d.case, ins[0]?.event_id ?? null);
+    return { pack: packOf(d.case.channel), caseNumber: prev ? Number(prev.doc.caseNumber) : caseNo + 1, ...link,
+      eventIdOf: (mid) => ev(mid)?.id ?? null, sourceTypeOf: (mid) => ev(mid)?.sourceType ?? null };
+  }
+  /** 케이스 문서 {doc, revision} — 지금 store로 다시 계산(collections.js syncCase + store.put). */
+  function crmCase(id) {
+    const d = store.get(id); if (!d) return null;
+    const prev = docs.cases.get(id);
+    const ctx = crmCtx(d);
+    const { doc, changed } = crm.projectCase(d, prev ? prev.doc : null, ctx);
+    if (!prev) caseNo += 1;
+    if (changed) docs.cases.set(id, { doc, revision: prev ? prev.revision + 1 : 1 });
+    return { ...docs.cases.get(id), ctx };
+  }
+  function crmList(q) {
+    const bad = crm.badFilter(q); if (bad) fail(400, 'bad_filter', { field: bad });
+    return crm.listView([...store.keys()].map((id) => crmCase(id).doc), q);
+  }
+  function crmDetail(id) {
+    const x = crmCase(id) || fail(404, 'case 없음');
+    const g = getCase(id); const doc = x.doc;
+    const rated = new Set(g.activities.filter((a) => a.type === 'shadow_rating').map((a) => a.payload && a.payload.draftId));
+    return crm.detailView({ // 이어진 케이스 없음 — 종결 뒤 회신은 같은 케이스를 다시 연다(cases.js addInbound)
+      doc, revision: x.revision, contact: docs.contacts.get(doc.contactId) ?? null, company: docs.companies.get(doc.companyId) ?? null,
+      events: g.messages.filter((m) => m.direction === 'in').map((m) => docs.events.get(m.event_id)).filter(Boolean),
+      activities: crm.projectActivities(store.get(id), x.ctx),
+      pendingDraft: g.drafts.filter((y) => y.status === 'PENDING').at(-1) ?? null,
+      shadowDraft: g.drafts.filter((y) => y.status === 'SHADOW' && !rated.has(y.id)).at(-1) ?? null,
+    });
+  }
+  /** 화면이 본 revision이 지금과 다르면 409 stale(index.js fresh). 보내지 않았으면 검사하지 않는다. */
+  const assertRevision = (id, expected) => { if (expected != null) { const { revision } = crmCase(id); if (revision !== Number(expected)) fail(409, 'stale', { revision }); } };
+  const note500 = (t) => guard.maskPii(t).slice(0, 500);
+  const caseActivity = (d, type, by, payload) => { activity(d, type, by, payload); emit('case.updated', { caseId: d.case.id, state: d.case.state, responder: d.case.responder }); };
+  function holdCase(caseId, { by, note, expectedRevision }) {
+    const d = mustCase(caseId);
+    const text = String(note ?? '').trim();
+    if (!text) fail(400, 'note 필요');
+    assertRevision(caseId, expectedRevision);
+    if (d.case.responder !== 'human' || d.case.state === 'CLOSED') fail(409, 'not_escalated');
+    if (d.case.held_at) fail(409, 'already_held');
+    const t = now(); const masked = note500(text);
+    Object.assign(d.case, { held_at: t, hold_note: masked, updated_at: t });
+    caseActivity(d, 'hold', by, { note: masked });
+    return { caseId, held: true };
+  }
+  function unholdCase(caseId, { by, expectedRevision }) {
+    const d = mustCase(caseId);
+    assertRevision(caseId, expectedRevision);
+    if (!d.case.held_at) fail(409, 'not_held');
+    Object.assign(d.case, { held_at: null, hold_note: null, updated_at: now() });
+    caseActivity(d, 'unhold', by, null);
+    return { caseId, held: false };
+  }
+  /** 종결 — 사유 필수(기타면 상세도). */
+  function closeWithReason(caseId, { by, reason, detail, expectedRevision }) {
+    const d = mustCase(caseId);
+    if (!crm.CLOSE_REASONS.includes(reason)) fail(400, 'bad_reason');
+    const text = String(detail ?? '').trim();
+    if (reason === 'other' && !text) fail(400, 'detail 필요');
+    assertRevision(caseId, expectedRevision);
+    if (d.case.state === 'CLOSED') fail(409, 'already_closed');
+    Object.assign(d.case, { close_reason: reason, close_detail: text ? note500(text) : null, held_at: null, hold_note: null });
+    return { ...closeCase(caseId, { by }), closeReason: reason };
   }
 
   /* ---- 녹화 재생: 서버가 실제로 낸 SSE 이벤트 순서대로 상태를 조금씩 바꾼다 ---- */
@@ -554,7 +639,7 @@ function protoCore(DATA, req, hooks) {
     for (const m of F.messages) if (!rowid.has(m.id)) rowid.set(m.id, (rec.rowids || {})[m.id] ?? ++maxRow);
     for (const k of ['messages', 'drafts', 'decisions', 'handoffs', 'activities']) {
       for (const x of F[k]) {
-        const y = clone(k === 'drafts' ? Object.fromEntries(Object.entries(x).filter(([key]) => !['preview', 'kbPassages', 'needs_send_check'].includes(key))) : x);
+        const y = clone(k === 'drafts' ? Object.fromEntries(Object.entries(x).filter(([key]) => !['preview', 'kbPassages'].includes(key))) : x);
         const i = d[k].findIndex((z) => z.id === y.id); if (i >= 0) d[k][i] = y; else d[k].push(y);
       }
     }
@@ -572,22 +657,24 @@ function protoCore(DATA, req, hooks) {
   }
   const routes = [
     ['GET', /^\/api\/health$/, () => DATA.health],
+    ['GET', /^\/api\/status$/, () => DATA.appStatus],
     ['GET', /^\/api\/me$/, () => ({ user: null, auth: 'none' })],
     ['GET', /^\/api\/stats$/, () => stats()],
     ['GET', /^\/api\/policy$/, () => DATA.policy],
     ['GET', /^\/api\/agent\/status$/, () => status()],
-    ['GET', /^\/api\/versions\/([0-9a-f]{6,40})$/, (m) => DATA.versions[m[1]] || fail(404, 'version 없음')],
     ['GET', /^\/api\/cases$/, (_m, q) => listCases(q)],
     ['GET', /^\/api\/cases\/([^/]+)$/, (m) => getCase(m[1]) || fail(404, 'case 없음')],
+    ['GET', /^\/api\/crm\/cases$/, (_m, q) => crmList(q)],
+    ['GET', /^\/api\/crm\/cases\/([^/]+)$/, (m) => crmDetail(m[1])],
     ['POST', /^\/api\/(?:test\/)?inbound$/, (_m, _q, b) => inbound(b)],
     ['POST', /^\/api\/drafts\/([^/]+)\/approve$/, (m, _q, b) => approveDraft(m[1], by(b))],
     ['POST', /^\/api\/drafts\/([^/]+)\/discard$/, (m, _q, b) => discardDraft(m[1], by(b))],
     ['POST', /^\/api\/drafts\/([^/]+)\/rate$/, (m, _q, b) => rateShadow(m[1], by(b))],
-    ['POST', /^\/api\/drafts\/([^/]+)\/resolve-sending$/, (m, _q, b) => resolveSending(m[1], by(b))],
     ['POST', /^\/api\/cases\/([^/]+)\/takeover$/, (m, _q, b) => takeover(m[1], by(b))],
-    ['POST', /^\/api\/cases\/([^/]+)\/return$/, (m, _q, b) => returnToAgent(m[1], by(b))],
-    ['POST', /^\/api\/cases\/([^/]+)\/close$/, (m, _q, b) => closeCase(m[1], by(b))],
-    ['POST', /^\/api\/cases\/([^/]+)\/reopen$/, (m, _q, b) => reopenCase(m[1], by(b))],
+    ['POST', /^\/api\/cases\/([^/]+)\/return$/, (m, _q, b) => returnCase(m[1], by(b))],
+    ['POST', /^\/api\/cases\/([^/]+)\/close$/, (m, _q, b) => closeWithReason(m[1], by(b))],
+    ['POST', /^\/api\/cases\/([^/]+)\/hold$/, (m, _q, b) => holdCase(m[1], by(b))],
+    ['POST', /^\/api\/cases\/([^/]+)\/unhold$/, (m, _q, b) => unholdCase(m[1], by(b))],
     ['POST', /^\/api\/cases\/([^/]+)\/note$/, (m, _q, b) => addNote(m[1], by(b))],
     ['POST', /^\/api\/cases\/([^/]+)\/human-reply$/, (m, _q, b) => humanReply(m[1], by(b))],
   ];
@@ -607,7 +694,7 @@ function protoCore(DATA, req, hooks) {
       return { status: 500, body: { error: 'internal' } };
     }
   }
-  return { handle, stats, status, listCases, getCase, canPlay, startPlay, stepPlay, endPlay, store };
+  return { handle, stats, status, listCases, getCase, crmList, crmDetail, canPlay, startPlay, stepPlay, endPlay, store };
 }
 
 /** 브라우저 접착부 — 시간 이동, 모듈 require, fetch·EventSource 가로채기, 자동 재생. */
@@ -839,13 +926,17 @@ async function main() {
 
   // ---- 1. 대시보드가 읽는 것 전부 스냅숏 ----
   const SNAP = new Date().toISOString();
-  const snap = { health: await get('/api/health'), stats: await get('/api/stats'), policy: await get('/api/policy'), status: await get('/api/agent/status'), list: await get('/api/cases?limit=500') };
+  const snap = { health: await get('/api/health'), appStatus: await get('/api/status'), stats: await get('/api/stats'), policy: await get('/api/policy'), status: await get('/api/agent/status'), list: await get('/api/cases?limit=500') };
   const ids = db.all('SELECT id FROM cases ORDER BY rowid').map((r) => r.id);
   const details = [];
   for (const id of ids) details.push(await get(`/api/cases/${id}`));
+  // CRM 화면: 상세를 먼저 읽고(그 케이스를 다시 동기화한다) 목록 → 그 뒤 문서 저장소를 그대로 스냅숏. 심은 이 문서를 직전 문서(prev)로 다시 투영한다.
+  const crmDetails = [];
+  for (const id of ids) crmDetails.push(await get(`/api/crm/cases/${id}`));
+  snap.crmList = await get('/api/crm/cases?limit=500');
+  const crmDocs = { cases: Object.fromEntries(ids.map((id) => [id, store.get('cases', id)])), contacts: {}, companies: {}, events: {} };
+  for (const [k, c] of [['contacts', 'contacts'], ['companies', 'companies'], ['events', 'inbound_events']]) for (const doc of store.all(c)) crmDocs[k][doc.id] = doc;
   const rowids = Object.fromEntries(db.all('SELECT id, rowid r FROM messages ORDER BY rowid').map((m) => [m.id, m.r]));
-  const versions = {};
-  for (const { hash } of db.all('SELECT hash FROM versions ORDER BY hash')) versions[hash] = await get(`/api/versions/${hash}`);
   const kb = Object.fromEntries(snap.policy.map((p) => [p.channel, { ko: kbLoader.load(p.channel, 'ko'), en: kbLoader.load(p.channel, 'en') }]));
   const env = { MAIL_PROVIDER: 'mock', MAIL_MOCK_LOG: '0' };
   for (const k of ['COMPANY_NAME', 'AGENT_NAME']) if (process.env[k]) env[k] = process.env[k];
@@ -880,14 +971,21 @@ async function main() {
     const evs = tape; tape = null;
     followups.push({ kind: 'followup', caseId, pre: { ...pre }, t0, rowids: rowidsOf(caseId), events: evs, final: await get(`/api/cases/${caseId}`) });
   }
+  // 접수 안내 초안 생성 이벤트는 심이 내는 모양(SENT)으로 싣는다
+  for (const r of [...pool, ...followups]) for (const e of r.events) if (e.name === 'draft.created' && e.data.status === 'SENDING') e.data.status = 'SENT';
 
-  const DATA = { env, rowids, health: snap.health, policy: snap.policy, status: snap.status, kb, promotion: policy.PROMOTION, versions, cases: details, pool, followups, queue: QUEUE };
+  const DATA = { env, rowids, health: snap.health, appStatus: snap.appStatus, policy: snap.policy, status: snap.status, kb, promotion: policy.PROMOTION, cases: details, crm: crmDocs, pool, followups, queue: QUEUE };
 
   // ---- 3. HTML ----
-  const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
+  const read = (p) => (CUTS[p] || []).reduce((s, [re, n]) => {
+    const hits = (s.match(re) || []).length;
+    if (hits !== n) throw new Error(`${p}에서 ${re}를 ${n}곳 기대했는데 ${hits}곳`);
+    return s.replace(re, '');
+  }, fs.readFileSync(path.join(ROOT, p), 'utf8'));
   const escJs = (s) => s.replace(/<\/(script)/gi, '<\\/$1').replace(/<!--/g, '<\\!--');
   const mods = BUNDLE.map((m) => `${JSON.stringify(m)}: function (module, exports, require, process) {\n${read(`server/${m}.js`)}\n}`);
   mods.push(`"agents/common": function (module) { ${COMMON_STUB} }`);
+  mods.push(`"mail/mock": function (module, exports, require) { ${MAIL_STUB} }`);
   const html = read('web/index.html');
   const bodyMarkup = (html.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [, html])[1].replace(/<script\b[^>]*\bsrc=[^>]*>\s*<\/script>\s*/gi, '').trim();
   const shim = `(function () {
@@ -901,6 +999,9 @@ ${protoCore.toString()}
 ${protoBrowser.toString()}
 protoBrowser(document.getElementById('proto-data').textContent, ${JSON.stringify(SNAP)}, PROTO_MODS, protoCore, protoSig, PROTO_SANITIZE);
 })();`;
+  const appText = read('web/app.js');
+  // CUTS가 문법을 깨지 않았는지 — 심 대조는 원본 모듈로 돌아 묶은 글을 보지 않는다
+  for (const s of [shim, appText]) new (require('node:vm').Script)(s);
   const tail = `(function () {
   // 검토자 이름이 비어 있으면 데모 이름을 넣는다(승인·인수에 필요). 문서가 이미 다 읽힌 뒤 붙은 경우 init을 직접 부른다.
   const ready = () => { const r = document.getElementById('reviewer'); if (r && !r.value) r.value = '데모 검토자'; };
@@ -910,7 +1011,7 @@ protoBrowser(document.getElementById('proto-data').textContent, ${JSON.stringify
   // 배너는 그리드 밖(고정)에 둔다 — 앱 레이아웃의 행 번호가 바뀌어도 밀리지 않게. 좁은 화면(본문이 블록 흐름)에선 일반 흐름.
   const PROTO_CSS = `body { padding-top: 24px; }
 .proto-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 5; height: 24px; line-height: 24px; padding: 0 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
-  background: var(--accent-soft); color: var(--accent); border-bottom: 1px solid var(--border); font-size: 12px; font-weight: 600; }
+  background: var(--surface-3); color: var(--text); border-bottom: 1px solid var(--border); font-size: 12px; }
 @media (max-width: 900px) {
   body { padding-top: 0; }
   .proto-banner { position: static; height: auto; line-height: 1.45; padding: 4px 16px; white-space: normal; }
@@ -921,9 +1022,9 @@ protoBrowser(document.getElementById('proto-data').textContent, ${JSON.stringify
     `<style>\n${PROTO_CSS}\n</style>`,
     '<div class="proto-banner" role="note">프로토타입 — 합성 데이터로 브라우저 안에서 재현합니다. 실제 메일은 나가지 않습니다.</div>',
     bodyMarkup,
-    `<script type="application/json" id="proto-data">${JSON.stringify(DATA).replace(/</g, '\\u003c')}</script>`,
+    `<script type="application/json" id="proto-data">${JSON.stringify(DATA, hideKeys).replace(/</g, '\\u003c')}</script>`,
     `<script>\n${escJs(shim)}\n</script>`,
-    `<script>\n${escJs(read('web/app.js'))}\n</script>`,
+    `<script>\n${escJs(appText)}\n</script>`,
     `<script>\n${tail}\n</script>`,
     '',
   ].join('\n');
@@ -934,17 +1035,23 @@ protoBrowser(document.getElementById('proto-data').textContent, ${JSON.stringify
   if (Buffer.byteLength(out) > 3 * 1024 * 1024) { console.error('3 MB 초과'); process.exitCode = 1; }
 
   // ---- 4. 대조: 심 vs 실제 서버 ----
-  const { problems, checked } = await verify({ DATA: clone({ ...DATA, cases: details }), snap, details, C, http });
+  const { problems, checked } = await verify({ DATA: JSON.parse(JSON.stringify({ ...DATA, cases: details }, hideKeys)), snap, details, crmDetails, C, http });
   server.close();
   if (problems.length) { console.error(`심 대조 불일치 ${problems.length}건:\n${problems.join('\n')}`); process.exitCode = 1; }
-  else console.log(`심 대조: 조회(목록·통계·상세 전부) + 사람 행동 ${checked}가지 실제 서버와 일치`);
+  else console.log(`심 대조: 조회(목록·통계·상세 전부, CRM 목록·상세 전부) + 사람 행동 ${checked}가지(처리 상세·CRM 상세) 실제 서버와 일치`);
+
+  // ---- 5. 금지어: 디스크에 쓴 결과를 다시 읽어 본다. 남았으면 파일을 지우고 실패 ----
+  const written = fs.readFileSync(OUT, 'utf8');
+  const leaks = FORBIDDEN.map((re) => [re, (written.match(new RegExp(re.source, `${re.flags}g`)) || []).length]).filter(([, n]) => n);
+  if (leaks.length) { fs.rmSync(OUT); console.error(`금지어 남음(결과 파일 지움): ${leaks.map(([re, n]) => `${re} ${n}곳`).join(', ')}`); process.exit(1); }
+  console.log(`금지어 검사: ${FORBIDDEN.length}개 패턴 0곳`);
 }
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
 const sortKeys = (v) => (Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 'object' ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sortKeys(v[k])])) : v);
 function norm(v) {
   const ids = new Map();
-  return JSON.stringify(sortKeys(v)).replace(UUID_RE, (u) => { if (!ids.has(u)) ids.set(u, `U${ids.size}`); return ids.get(u); })
+  return JSON.stringify(sortKeys(v), hideKeys).replace(UUID_RE, (u) => { if (!ids.has(u)) ids.set(u, `U${ids.size}`); return ids.get(u); })
     .replace(/"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"/g, '"T"').replace(/"(latency_ms|latencyMs)":\d+/g, '"$1":0');
 }
 function diff(label, a, b) {
@@ -953,16 +1060,28 @@ function diff(label, a, b) {
   return `  ${label}: 서버 …${a.slice(Math.max(0, i - 60), i + 80)}…\n  ${' '.repeat(label.length)}  심   …${b.slice(Math.max(0, i - 60), i + 80)}…`;
 }
 
-async function verify({ DATA, snap, details, C, http }) {
+/** CRM 상세 비교용 — revision은 서버 flush 시점에 따라 달라진다. 발송 활동과 담당 변경이 서로 다른 시계 읽기라
+ * ms가 갈리면 audit.updatedBy와 이력의 changedBy·reason이 서버·심에서 따로 뒤집힌다 → updatedBy를 빼고 이력은 마지막 항목의 상태만.
+ * 대화 칸은 같은 ms 안 행의 순서가 서버·심 시계에 따라 달라져 시각을 지운 내용으로 정렬해 비교한다. */
+function crmNorm(x) {
+  if (!x || !x.case) return norm(x);
+  const h = x.case.statusHistory || []; const l = h[h.length - 1] || {};
+  return norm({ ...x, revision: 0, case: { ...x.case, audit: { ...x.case.audit, updatedBy: undefined }, statusHistory: [{ toStatus: l.toStatus, toSubStatus: l.toSubStatus }] },
+    timeline: x.timeline.map((t) => norm(t)).sort() });
+}
+
+async function verify({ DATA, snap, details, crmDetails, C, http }) {
   const problems = [];
   const nodeReq = (n) => require(path.join(SERVER, n));
   const noHooks = { emit() {}, stagger() {}, inbound() { throw new Error('n/a'); } };
   // 조회: 바이트 단위로 같아야 한다
   const v = protoCore(DATA, nodeReq, noHooks);
-  const eq = (label, server, shim) => { const p = diff(label, JSON.stringify(server), JSON.stringify(shim)); if (p) problems.push(p); };
+  const eq = (label, server, shim) => { const p = diff(label, JSON.stringify(server, hideKeys), JSON.stringify(shim, hideKeys)); if (p) problems.push(p); };
   eq('GET /api/cases', snap.list, v.listCases({ limit: '500' }));
   eq('GET /api/stats', snap.stats, v.stats());
   for (const d of details) eq(`GET /api/cases/${d.case.id.slice(0, 8)}`, d, v.getCase(d.case.id));
+  eq('GET /api/crm/cases', snap.crmList, v.crmList({ limit: '500' }));
+  for (const d of crmDetails) eq(`GET /api/crm/cases/${d.case.id.slice(0, 8)}`, d, v.crmDetail(d.case.id));
 
   // 사람 행동: 같은 요청을 실제 서버와 심에 보내고 응답·상세를 비교(id·시각은 정규화)
   const p = protoCore(DATA, nodeReq, noHooks);
@@ -982,11 +1101,13 @@ async function verify({ DATA, snap, details, C, http }) {
     ['직접 답장', C[4], `/api/cases/${C[4]}/human-reply`, { by, body: '확인해 보니 사용 기록이 없어 결제 건을 취소 처리했습니다.' }],
     ['반환(재판단, 접수 안내 이미 있음)', C[5], `/api/cases/${C[5]}/return`, { by }],
     ['반환(재판단, 접수 안내 다시)', C[6], `/api/cases/${C[6]}/return`, { by }],
-    ['종결', C[17], `/api/cases/${C[17]}/close`, { by }],
-    ['재오픈(자동 종결)', C[10], `/api/cases/${C[10]}/reopen`, { by }],
-    ['재오픈(사람 종결)', C[2], `/api/cases/${C[2]}/reopen`, { by }],
-    ['열린 케이스 재오픈 → 409', C[2], `/api/cases/${C[2]}/reopen`, { by }],
+    ['종결 사유 없음 → 400', C[17], `/api/cases/${C[17]}/close`, { by }],
+    ['종결', C[17], `/api/cases/${C[17]}/close`, { by, reason: 'resolved' }],
+    ['재오픈 → 404', C[2], `/api/cases/${C[2]}/reopen`, { by }],
     ['메모', C[7], `/api/cases/${C[7]}/note`, { by, text: '법무팀 공유 완료' }],
+    ['보류', C[7], `/api/cases/${C[7]}/hold`, { by, note: '법무 검토 회신 대기' }],
+    ['에이전트 케이스 보류 → 409', C[15], `/api/cases/${C[15]}/hold`, { by, note: '확인 대기' }],
+    ['보류 해제', C[7], `/api/cases/${C[7]}/unhold`, { by }],
     ['섀도 평가', C.shadow, `/api/drafts/${det(C.shadow).drafts.find((d) => d.status === 'SHADOW').id}/rate`, { by, rating: 'good' }],
   ];
   for (const [label, caseId, url, body] of actions) {
@@ -995,6 +1116,7 @@ async function verify({ DATA, snap, details, C, http }) {
       const sim = await p.handle('POST', url, clone(body));
       const a = diff(`${label} 응답`, norm(real), norm(sim)); if (a) problems.push(a);
       const b = diff(`${label} 상세`, norm((await http('GET', `/api/cases/${caseId}`)).body), norm(p.getCase(caseId))); if (b) problems.push(b);
+      const c = diff(`${label} CRM 상세`, crmNorm((await http('GET', `/api/crm/cases/${caseId}`)).body), crmNorm(p.crmDetail(caseId))); if (c) problems.push(c);
     } catch (e) { problems.push(`  ${label}: 예외 ${e.stack}`); }
   }
   return { problems, checked: actions.length };

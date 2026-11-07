@@ -1,7 +1,11 @@
 'use strict';
 // 실데이터 가능성 검토(docs/feasibility.md). 레포 밖에 둔 라벨 메일 쌍을 실제 루프(runCycle) + mock LLM으로 로컬에서만 돌린다.
-// 사용: LLM_PROVIDER=mock node scripts/eval-real.js [데이터 폴더=../data] [출력 폴더=../eval-out]
-// 개인정보: 네트워크 차단(fetch 무력화, mock 강제). 행별 결과는 출력 폴더(레포 밖 강제)에만, 표준 출력엔 집계만. 본문은 어디에도 안 쓴다.
+// 사용: LLM_PROVIDER=mock node scripts/eval-real.js [데이터 폴더=../data] [출력 폴더=../eval-out] [--name-col=<칸>] [--mask-terms=<파일>]
+// 실제 provider(평가셋 행만): LLM_PROVIDER=anthropic ANTHROPIC_API_KEY=… node scripts/eval-real.js … --provider=anthropic --approved-by=<승인 문서·승인자>
+// 개인정보: mock은 네트워크 차단(fetch 무력화). 실제 provider는 기본 Anthropic 오리진만 열고(ANTHROPIC_BASE_URL을 바꾼 값이면 거부),
+// 시작 전에 합성 식별자 메일로 LLM에 갈 프롬프트를 자기 점검한다. 행별 결과는 출력 폴더(레포 밖 강제)에만, 표준 출력엔 집계만. 본문은 어디에도 안 쓴다.
+// 이름: --name-col을 주면 reply_pairs.csv의 그 칸을 고객 이름으로 넘겨 [NAME]으로 가린다. 없으면 본문 속 실명은 가리지 않는다 —
+// --mask-terms(레포 밖 파일, 한 줄 한 단어)로 보완한다. 그 단어는 제목·본문에서 [TERM]으로 바꾼 뒤 루프에 넣는다.
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
@@ -38,24 +42,109 @@ const ASSIST = ['DRAFT', 'ANSWER_AND_HANDOFF'];
 // stripQuotes가 못 걷은 인용 머리(줄 중간·콜론 끝 변형). 집계만 한다.
 const QUOTE_LEFT_RE = /님이 작성|wrote:|Original Message|^\s*(보낸 사람|From):/m;
 
-function guardEnv() {
-  // 명시적 LLM_PROVIDER=mock만 받는다(비우면 ANTHROPIC_API_KEY가 있을 때 anthropic이 기본이 된다).
-  const p = process.env.LLM_PROVIDER;
-  if (p !== 'mock') { console.error(`거부: LLM_PROVIDER=${p ?? '(없음)'}. 실데이터는 LLM_PROVIDER=mock으로만 돈다.`); process.exit(1); }
-  Object.assign(process.env, { LLM_PROVIDER: 'mock', MAIL_PROVIDER: 'mock', MAIL_MOCK_LOG: '0' });
-  // CS_ABLATE: mock 메일이라 비교 실험 스위치가 먹는다 — 실데이터 평가는 늘 장치를 다 켠 채로
-  for (const k of ['ANTHROPIC_API_KEY', 'ANTHROPIC_BASE_URL', 'NOTIFY_WEBHOOK_URL', 'LLM_MOCK_DELAY_MS', 'SHADOW_CHANNELS', 'CS_ABLATE']) delete process.env[k];
-  globalThis.fetch = () => { throw new Error('eval-real: 네트워크 차단'); };
+const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'; // server/llm/anthropic.js 기본값과 같아야 한다(다르면 막힌다)
+const arg = (argv, k) => { const a = argv.find((x) => x === `--${k}` || x.startsWith(`--${k}=`)); return a === undefined ? undefined : a.includes('=') ? a.slice(a.indexOf('=') + 1) : true; };
+const filled = (v) => typeof v === 'string' && v.trim() !== '';
+const outside = (p) => path.relative(ROOT, p).startsWith('..');
+
+/** 실행 조건 검사(env·argv만 본다, 바꾸지 않는다). 거부면 {error}, 아니면 실행 옵션. */
+function guardEnv(env = process.env, argv = process.argv) {
+  const provider = arg(argv, 'provider') ?? 'mock';
+  const pos = argv.slice(2).filter((x) => !x.startsWith('--'));
+  const o = {
+    provider, approvedBy: null, nameCol: arg(argv, 'name-col') ?? null, maskTerms: arg(argv, 'mask-terms') ?? null,
+    dataDir: path.resolve(pos[0] || path.join(ROOT, '..', 'data')), outDir: path.resolve(pos[1] || path.join(ROOT, '..', 'eval-out')),
+  };
+  if (provider === 'mock') {
+    // 명시적 LLM_PROVIDER=mock만 받는다(비우면 ANTHROPIC_API_KEY가 있을 때 anthropic이 기본이 된다).
+    if (env.LLM_PROVIDER !== 'mock') return { error: `거부: LLM_PROVIDER=${env.LLM_PROVIDER ?? '(없음)'}. 실데이터는 LLM_PROVIDER=mock으로만 돈다(실제 provider는 --provider=anthropic --approved-by=…).` };
+  } else if (provider === 'anthropic') {
+    // 실제 provider는 env·플래그·승인·키가 모두 있을 때만. 오리진은 env로 넓히지 못한다.
+    if (env.LLM_PROVIDER !== 'anthropic') return { error: `거부: --provider=anthropic인데 LLM_PROVIDER=${env.LLM_PROVIDER ?? '(없음)'}. 둘이 같아야 한다.` };
+    if (!filled(arg(argv, 'approved-by'))) return { error: '거부: 실제 provider는 --approved-by=<승인 문서·승인자>가 있어야 돈다.' };
+    if (!filled(env.ANTHROPIC_API_KEY)) return { error: '거부: ANTHROPIC_API_KEY 없음.' };
+    if (env.ANTHROPIC_BASE_URL && env.ANTHROPIC_BASE_URL !== ANTHROPIC_API) return { error: `거부: ANTHROPIC_BASE_URL이 기본값(${ANTHROPIC_API})이 아니다 — 실평가는 기본 Anthropic 오리진으로만 보낸다.` };
+    o.approvedBy = arg(argv, 'approved-by').trim();
+  } else return { error: `거부: --provider=${provider} (mock | anthropic)` };
+  if (o.nameCol !== null && !filled(o.nameCol)) return { error: '거부: --name-col=<칸 이름>.' };
+  if (o.maskTerms !== null && !(filled(o.maskTerms) && outside(path.resolve(o.maskTerms)))) return { error: '거부: --mask-terms 파일은 레포 밖이어야 한다(한 줄 한 단어).' };
+  if (!outside(o.outDir)) return { error: '거부: 출력 폴더가 레포 안이다.' };
+  return o;
 }
 
-async function main() {
-  guardEnv();
+/** 프로세스 잠금 — mock 메일·알림 끔, mock이면 네트워크 전부 차단, 실제 provider면 기본 Anthropic 오리진만 연다. */
+function lockDown({ provider }) {
+  Object.assign(process.env, { LLM_PROVIDER: provider, MAIL_PROVIDER: 'mock', MAIL_MOCK_LOG: '0' });
+  // CS_ABLATE: mock 메일이라 비교 실험 스위치가 먹는다 — 실데이터 평가는 늘 장치를 다 켠 채로
+  for (const k of ['ANTHROPIC_BASE_URL', 'NOTIFY_WEBHOOK_URL', 'LLM_MOCK_DELAY_MS', 'SHADOW_CHANNELS', 'CS_ABLATE', ...(provider === 'mock' ? ['ANTHROPIC_API_KEY'] : [])]) delete process.env[k];
+  const target = globalThis.fetch;
+  const origin = new URL(ANTHROPIC_API).origin;
+  globalThis.fetch = provider === 'mock' ? () => { throw new Error('eval-real: 네트워크 차단'); } : (url, init) => {
+    if (new URL(String(url)).origin !== origin) throw new Error(`eval-real: 허용 안 된 오리진 — ${origin}만 연다`);
+    return target(url, init);
+  };
+}
+
+// 자기 점검용 합성 식별자(실제 값 아님). 형태는 루프 마스킹이 가리는 범주 전부.
+const PROBE = {
+  name: '김가람', rrn: ['800101-1234567', '800101 1234567', '8001011234567'], card: '4111 1111 1111 1111', account: '110-123-456789',
+  passport: 'M12345678', order: 'ORD-20261031-0042', email: 'garam.kim@probe.example', phone: '010-2345-6789', intl: '+1 415 555 0100',
+  url: 'https://youtube.com/@garam', address: '서울시 강남구 테헤란로 123',
+};
+const PROBE_TEXT = `저는 ${PROBE.name}이라고 합니다.
+주민번호 ${PROBE.rrn.join(' / ')}
+카드 ${PROBE.card}, 계좌 ${PROBE.account}, 여권번호 ${PROBE.passport}, 주문번호: ${PROBE.order}
+메일 ${PROBE.email} 연락처 ${PROBE.phone} 해외 ${PROBE.intl}
+채널 ${PROBE.url}
+주소 ${PROBE.address}
+
+${PROBE.name}드림`; // 이름 뒤에 어미·서명이 띄어쓰기 없이 붙은 경우도 본다
+
+/**
+ * 자기 점검 — 마스킹 함수가 아니라 LLM에 갈 조립된 프롬프트를 본다. 합성 식별자 메일 두 통(초안 경로·넘김 경로, 폼 값 포함)을
+ * spy provider(응답은 mock, 네트워크 없음)로 실제 회차에 돌려 네 에이전트의 system·user에 원문 값이 있으면 위반. 빈 배열 = 통과.
+ */
+async function selfCheck() {
+  const db = require('../server/db');
+  const llm = require('../server/llm');
+  const mock = require('../server/llm/mock');
+  const cases = require('../server/cases');
+  const loop = require('../server/loop');
+  const seen = [];
+  llm.use({ name: 'selfcheck', json: async (req) => { seen.push(req); return mock.json(req); } });
+  db.init(':memory:');
+  for (const [i, ask] of ['영수증 발급 방법 알려주세요.', '환불해 주세요.'].entries()) {
+    const r = cases.addInbound({
+      channel: 'support', from: 'probe@example.invalid', name: PROBE.name, subject: '문의', body: `${ask}\n${PROBE_TEXT}`,
+      knownFacts: { 주소: PROBE.address, 여권: PROBE.passport }, threadId: `selfcheck-${i}`, providerMessageId: `selfcheck-${i}`,
+    });
+    await loop.runCycle(r.caseId, r.messageId);
+  }
+  const raw = Object.values(PROBE).flat();
+  return [
+    ...['briefer', 'responder', 'reviewer', 'triage'].filter((a) => !seen.some((x) => x.agent === a)).map((a) => `${a}: 호출 없음`),
+    ...seen.flatMap((x) => raw.filter((v) => `${x.system}\n${x.user}`.includes(v)).map((v) => `${x.agent}: ${v}`)),
+  ];
+}
+
+async function main(argv = process.argv) {
+  const o = guardEnv(process.env, argv);
+  if (o.error) { console.error(o.error); process.exit(1); }
+  lockDown(o);
+  const startedAt = new Date().toISOString();
   // 파서 자기 점검 — 따옴표·필드 안 줄바꿈·이스케이프·BOM·CRLF
   assert.deepEqual(parseCsv('﻿a,b\r\n"x,\n""y""",2\r\n'), [{ a: 'x,\n"y"', b: '2' }]);
+  // 프롬프트 자기 점검 — 데이터를 읽기 전에. 실패면 아무것도 보내지 않고 끝낸다.
+  const bad = await selfCheck();
+  if (bad.length) { console.error(`거부: 자기 점검 실패 — LLM에 갈 프롬프트에 원문 식별자가 남는다(${bad.join(', ')})`); process.exit(1); }
+  const terms = o.maskTerms ? fs.readFileSync(o.maskTerms, 'utf8').split(/\r?\n/).map((x) => x.trim()).filter(Boolean) : [];
+  // 긴 단어 먼저(「ACME 코리아」가 「ACME」보다 먼저), 대소문자 무시
+  const termRe = terms.length ? new RegExp(terms.sort((a, b) => b.length - a.length).map((x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi') : null;
+  const maskTerms = (x) => (termRe ? String(x ?? '').replace(termRe, '[TERM]') : x);
+  const real = o.provider !== 'mock';
+  console.log(`모드: ${o.provider}${real ? ` · 승인 ${o.approvedBy} · 평가셋 행만` : ''} · 이름 가림 ${o.nameCol ? `칸 ${o.nameCol}` : '꺼짐 — 본문 속 실명은 가리지 않는다(--name-col 없음, --mask-terms로 보완)'} · 단어 가림 ${terms.length}개`);
 
-  const dataDir = path.resolve(process.argv[2] || path.join(ROOT, '..', 'data'));
-  const outDir = path.resolve(process.argv[3] || path.join(ROOT, '..', 'eval-out'));
-  if (!path.relative(ROOT, outDir).startsWith('..')) { console.error('거부: 출력 폴더가 레포 안이다.'); process.exit(1); }
+  const { dataDir, outDir } = o;
   const read = (f) => parseCsv(fs.readFileSync(path.join(dataDir, f), 'utf8'));
   const evalSet = read('eval_set.csv'); const labels = read('intent_labels.csv'); const pairs = read('reply_pairs.csv');
   // 종결 대리 지표: 사람 답장 뒤 같은 스레드에 고객 메일이 또 왔나(수신 시각만 본다 — 본문은 안 읽는다)
@@ -72,13 +161,15 @@ async function main() {
   const labelByEval = new Map(); for (const l of labels) labelByEval.set(ek(l), [...(labelByEval.get(ek(l)) || []), l]);
   const evalLabels = evalSet.map((e) => { const m = labelByEval.get(ek(e)) || []; assert.equal(m.length, 1, '평가셋 조인'); return m[0]; });
   const csLabels = labels.filter((l) => l['CS범위여부'] === 'Y');
+  if (o.nameCol && !(pairs.length && o.nameCol in pairs[0])) { console.error(`거부: --name-col=${o.nameCol} 칸이 reply_pairs.csv에 없다.`); process.exit(1); }
 
   const db = require('../server/db');
   const llm = require('../server/llm');
   const cases = require('../server/cases');
   const loop = require('../server/loop');
   const guard = require('../server/guard');
-  llm.use('mock');
+  llm.use(o.provider);
+  const models = new Set();
   // 사람 답장·에이전트 초안에 같은 잣대 — 팩 허용값 무시(pack 없음)로 금액·날짜 약속을 찾고, 링크는 있는지만. 인용 문구는 남기지 않는다.
   const risk = (body) => {
     const codes = new Set(guard.check({ body, only: ['amount', 'date_promise'] }).map((h) => h.code));
@@ -99,10 +190,14 @@ async function main() {
     else {
       db.init(':memory:'); // 쌍마다 새 DB — 스레드 앞 메일 없이 이 메시지 하나만 본다
       // 발신자는 가짜 주소(실주소는 루프 판단에 안 쓰인다). 인용 제거는 addInbound가 stripQuotes로 한다(/api/inbound와 같은 경로).
-      const r = cases.addInbound({ channel, from: 'customer@example.invalid', subject: p['문의제목'], body: p['문의본문'], threadId: 'eval', providerMessageId: 'eval' });
+      // 이름 칸이 있으면 고객 이름으로 넘긴다 — 루프가 LLM 입력에서 [NAME]으로 가린다.
+      const r = cases.addInbound({ channel, from: 'customer@example.invalid', name: o.nameCol ? p[o.nameCol] : undefined, subject: maskTerms(p['문의제목']), body: maskTerms(p['문의본문']), threadId: 'eval', providerMessageId: 'eval' });
       const t0 = performance.now();
       await loop.runCycle(r.caseId, r.messageId);
       const ms = performance.now() - t0;
+      // 계량은 다음 db.init 전에 이 행의 llm_calls에서 모은다(DB가 행마다 새것이라 이 행 것만 있다)
+      for (const x of db.all('SELECT DISTINCT model FROM llm_calls WHERE model IS NOT NULL')) models.add(x.model);
+      const usage = db.get('SELECT COUNT(*) calls, COALESCE(SUM(latency_ms), 0) latencyMs, COALESCE(SUM(input_tokens), 0) inputTokens, COALESCE(SUM(output_tokens), 0) outputTokens FROM llm_calls');
       const m = db.get('SELECT body, body_clean FROM messages WHERE id=?', r.messageId);
       const draft = db.get("SELECT original_body FROM drafts WHERE case_id=? AND COALESCE(action, '')<>'ACK' ORDER BY created_at DESC LIMIT 1", r.caseId);
       // 1차 응대 3분류: 완전 자동응대(L2 자동 발송된 DRAFT) · 사람에게 넘김(접수 안내 / 답장+넘김 / 승인 대기 초안) · 응대 못함
@@ -125,10 +220,11 @@ async function main() {
         guard: steps.filter((x) => x.step === 'guard' && x.reason).flatMap((x) => x.reason.split(',')),
         review: steps.filter((x) => x.step === 'review' && x.reason).flatMap((x) => x.reason.split(',')),
         stripped: m.body_clean.length < m.body.trim().length, quoteLeft: QUOTE_LEFT_RE.test(m.body_clean),
-        // 에이전트 측정값: 회차 처리 시간(mock — LLM 지연 없음)·LLM 호출 수·초안 길이·같은 잣대 위험·마지막 guard 위반(승인 큐에 오른 초안이면 0이어야 한다)
+        // 에이전트 측정값: 회차 처리 시간(mock이면 LLM 지연 없음)·LLM 호출 수·초안 길이·같은 잣대 위험·마지막 guard 위반(승인 큐에 오른 초안이면 0이어야 한다)
         agent: { ms, llmCalls, draftLen: draft ? draft.original_body.length : null, ...(draft ? risk(draft.original_body) : {}), finalGuard: last('guard')?.reason || null, autoSent, ack, pending },
         bucket: autoSent && ex.action === 'DRAFT' ? 'auto' : ack || autoSent || pending ? 'handoff' : 'none',
         sub: autoSent && ex.action === 'DRAFT' ? 'auto' : ack ? 'ack' : autoSent ? 'aah_auto' : pending ? (ex.action === 'DRAFT' ? 'draft_pending' : 'aah_pending') : ex.action === 'IGNORE' ? 'ignored' : 'no_ack',
+        llm: { ...usage }, // {latencyMs, calls, inputTokens, outputTokens} — llm_calls 기준(실패 호출 포함)
       });
     }
     cache.set(i, row);
@@ -136,17 +232,22 @@ async function main() {
   }
 
   const evalRows = []; for (const l of evalLabels) evalRows.push(await runOne(l));
-  const csRows = []; for (const l of csLabels) csRows.push(await runOne(l));
+  const csRows = []; if (!real) for (const l of csLabels) csRows.push(await runOne(l)); // 실제 provider는 평가셋 행만
+  const finishedAt = new Date().toISOString();
 
   fs.mkdirSync(outDir, { recursive: true });
   const ordered = [...cache.values()].sort((a, b) => a.행번호 - b.행번호);
   fs.writeFileSync(path.join(outDir, 'rows.jsonl'), ordered.map((r) => JSON.stringify({ ...r, inEval: evalRows.includes(r) })).join('\n') + '\n');
-  const summary = { joins: { pairs: pairs.length, labels: labels.length, eval: evalLabels.length, cs: csLabels.length }, eval: summarize(evalRows), cs: summarize(csRows) };
+  const run = { provider: llm.name(), models: [...models].sort(), approvedBy: o.approvedBy, nameMasking: o.nameCol ? `column:${o.nameCol}` : 'off', maskTerms: terms.length, startedAt, finishedAt };
+  const summary = { run, joins: { pairs: pairs.length, labels: labels.length, eval: evalLabels.length, cs: csLabels.length }, eval: summarize(evalRows), cs: summarize(csRows) };
   fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify(summary, null, 2) + '\n');
   printReport(summary);
   const sc = scenarios(csRows, evalRows);
   fs.writeFileSync(path.join(outDir, 'scenarios.json'), JSON.stringify(sc, null, 2) + '\n');
   printScenarios(sc);
+  const llmRows = ordered.filter((r) => r.llm);
+  const sum = (k) => llmRows.reduce((a, r) => a + r.llm[k], 0);
+  console.log(`\nLLM(${run.provider}): 호출 ${sum('calls')} · 입력 토큰 ${sum('inputTokens')} · 출력 토큰 ${sum('outputTokens')} · 모델 ${run.models.join(', ') || '-'}`);
 }
 
 /* ---- 시나리오 태스크: (문의유형 · 사람 대응) 조합마다 사람 실제 응대 vs 에이전트 회차 ---- */
@@ -318,4 +419,4 @@ function printReport(s) {
 }
 
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { parseCsv };
+module.exports = { parseCsv, guardEnv, lockDown, selfCheck, main };
