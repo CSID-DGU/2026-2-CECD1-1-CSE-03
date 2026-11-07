@@ -1,0 +1,1540 @@
+{
+ "AWSTemplateFormatVersion": "2010-09-09",
+ "Description": "cs-agent 운영 스택(단일 고객). SES 수신 → S3 원문 → SNS → SQS(+DLQ) → EC2 한 대의 수신 어댑터와 서버. 모델은 Claude API 키로 직접 부르고 키는 Secrets Manager에만 있다. 인바운드 포트 0, 운영자는 SSM 포트 포워딩으로 접속한다. 첫 배포는 미러 모드다.",
+ "Parameters": {
+  "MailDomain": {
+   "Type": "String",
+   "Description": "주 도메인(발송 identity, DKIM). 예 acme.example",
+   "AllowedPattern": "^[a-z0-9.-]+\\.[a-z]{2,}$"
+  },
+  "MirrorDomain": {
+   "Type": "String",
+   "Description": "미러 수신 하위 도메인. 예 mirror.acme.example. 주 도메인 MX 는 건드리지 않는다",
+   "AllowedPattern": "^[a-z0-9.-]+\\.[a-z]{2,}$"
+  },
+  "InboundAddresses": {
+   "Type": "CommaDelimitedList",
+   "Description": "수신 규칙 수신자(쉼표). 미러 단계는 MirrorDomain 주소"
+  },
+  "ChannelMap": {
+   "Type": "String",
+   "Description": "SES_CHANNELS: 받는주소=채널 쉼표 목록. 예 support@mirror.acme.example=support",
+   "AllowedPattern": "^[^\"\\\\]*$"
+  },
+  "SmtpFrom": {
+   "Type": "String",
+   "Description": "SMTP_FROM: 보내는 주소",
+   "AllowedPattern": "^[^\"\\\\]*$"
+  },
+  "MailAllowedDomains": {
+   "Type": "String",
+   "Default": "",
+   "Description": "MAIL_ALLOWED_DOMAINS: 실발송 수신자 도메인 허용 목록(쉼표). 비면 전부 차단",
+   "AllowedPattern": "^[^\"\\\\]*$"
+  },
+  "MailMode": {
+   "Type": "String",
+   "Default": "mirror",
+   "AllowedValues": [
+    "mirror",
+    "smtp"
+   ],
+   "Description": "mirror = 발송 없음(mock 메일 + 섀도). smtp = SES SMTP 실발송"
+  },
+  "ShadowChannels": {
+   "Type": "String",
+   "Default": "support,onboarding,sales",
+   "Description": "SHADOW_CHANNELS",
+   "AllowedPattern": "^[^\"\\\\]*$"
+  },
+  "AdminUsers": {
+   "Type": "String",
+   "Default": "",
+   "Description": "ADMIN_USERS: 콘솔 관리자(basic auth 사용자 이름과 같은 형식, 쉼표)",
+   "AllowedPattern": "^[^\"\\\\]*$"
+  },
+  "AnthropicModel": {
+   "Type": "String",
+   "Default": "claude-sonnet-5-5",
+   "Description": "ANTHROPIC_MODEL",
+   "AllowedPattern": "^[A-Za-z0-9._:-]+$"
+  },
+  "LlmDailyBudget": {
+   "Type": "String",
+   "Default": "2000000",
+   "Description": "LLM_DAILY_TOKEN_BUDGET: 하루 입력+출력 토큰 상한. 비우면 무제한",
+   "AllowedPattern": "^[0-9]*$"
+  },
+  "PriceInputPerMtok": {
+   "Type": "String",
+   "Default": "",
+   "Description": "LLM_PRICE_INPUT_PER_MTOK(USD). 비우면 비용을 계산하지 않는다",
+   "AllowedPattern": "^([0-9]+(\\.[0-9]+)?)?$"
+  },
+  "PriceOutputPerMtok": {
+   "Type": "String",
+   "Default": "",
+   "Description": "LLM_PRICE_OUTPUT_PER_MTOK(USD). 비우면 비용을 계산하지 않는다",
+   "AllowedPattern": "^([0-9]+(\\.[0-9]+)?)?$"
+  },
+  "ImageTag": {
+   "Type": "String",
+   "Description": "ECR 이미지 태그(불변). 업그레이드·롤백은 이 값 + 재시작",
+   "AllowedPattern": "^[A-Za-z0-9._-]{1,128}$"
+  },
+  "InstanceType": {
+   "Type": "String",
+   "Default": "t4g.small",
+   "AllowedValues": [
+    "t4g.small",
+    "t4g.medium",
+    "t4g.large"
+   ],
+   "Description": "arm64 인스턴스(AmiId 와 같은 아키텍처)"
+  },
+  "AmiId": {
+   "Type": "AWS::EC2::Image::Id",
+   "Description": "AL2023 arm64 표준 AMI id. 배포 때 공개 SSM 파라미터를 한 번 풀어 명시 값으로 넣는다(바꾸면 인스턴스 교체)"
+  },
+  "DataVolumeGiB": {
+   "Type": "Number",
+   "Default": 20,
+   "MinValue": 8,
+   "MaxValue": 1000,
+   "Description": "데이터 볼륨(GiB)"
+  },
+  "SnapshotRetainCount": {
+   "Type": "Number",
+   "Default": 14,
+   "MinValue": 1,
+   "MaxValue": 1000,
+   "Description": "매일 스냅샷 보존 개수"
+  },
+  "RawMailRetentionDays": {
+   "Type": "Number",
+   "Default": 7,
+   "MinValue": 1,
+   "MaxValue": 365,
+   "Description": "S3 원문 메일 보존 일수"
+  },
+  "AlarmEmail": {
+   "Type": "String",
+   "Default": "",
+   "Description": "경보 받을 이메일(선택)",
+   "AllowedPattern": "^$|^[^@\\s]+@[^@\\s]+$"
+  }
+ },
+ "Conditions": {
+  "HasAlarmEmail": {
+   "Fn::Not": [
+    {
+     "Fn::Equals": [
+      {
+       "Ref": "AlarmEmail"
+      },
+      ""
+     ]
+    }
+   ]
+  }
+ },
+ "Resources": {
+  "Vpc": {
+   "Type": "AWS::EC2::VPC",
+   "Properties": {
+    "CidrBlock": "10.40.0.0/24",
+    "EnableDnsSupport": true,
+    "EnableDnsHostnames": true,
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": {
+       "Ref": "AWS::StackName"
+      }
+     }
+    ]
+   }
+  },
+  "InternetGateway": {
+   "Type": "AWS::EC2::InternetGateway"
+  },
+  "GatewayAttachment": {
+   "Type": "AWS::EC2::VPCGatewayAttachment",
+   "Properties": {
+    "VpcId": {
+     "Ref": "Vpc"
+    },
+    "InternetGatewayId": {
+     "Ref": "InternetGateway"
+    }
+   }
+  },
+  "PublicSubnet": {
+   "Type": "AWS::EC2::Subnet",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "NAT 없이 바깥(Claude API, SES SMTP, AWS API, 패키지 저장소)으로 나가려면 공개 IPv4 가 필요하다. 들어오는 길은 보안 그룹이 막는다."
+    }
+   },
+   "Properties": {
+    "VpcId": {
+     "Ref": "Vpc"
+    },
+    "CidrBlock": "10.40.0.0/26",
+    "AvailabilityZone": {
+     "Fn::Select": [
+      0,
+      {
+       "Fn::GetAZs": ""
+      }
+     ]
+    },
+    "MapPublicIpOnLaunch": true
+   }
+  },
+  "RouteTable": {
+   "Type": "AWS::EC2::RouteTable",
+   "Properties": {
+    "VpcId": {
+     "Ref": "Vpc"
+    }
+   }
+  },
+  "PublicRoute": {
+   "Type": "AWS::EC2::Route",
+   "DependsOn": "GatewayAttachment",
+   "Properties": {
+    "RouteTableId": {
+     "Ref": "RouteTable"
+    },
+    "DestinationCidrBlock": "0.0.0.0/0",
+    "GatewayId": {
+     "Ref": "InternetGateway"
+    }
+   }
+  },
+  "SubnetRouteTable": {
+   "Type": "AWS::EC2::SubnetRouteTableAssociation",
+   "Properties": {
+    "SubnetId": {
+     "Ref": "PublicSubnet"
+    },
+    "RouteTableId": {
+     "Ref": "RouteTable"
+    }
+   }
+  },
+  "InstanceSecurityGroup": {
+   "Type": "AWS::EC2::SecurityGroup",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "인바운드 규칙 0개. 메일은 인스턴스가 큐에서 당겨 오고 사람은 SSM 터널로 들어온다. VPC DNS(169.254.169.253)·IMDS·Time Sync 는 보안 그룹 영향을 받지 않으므로 53 등을 열지 않는다. 443 = Claude API·AWS API·ECR·패키지, 587 = SES SMTP.",
+     "must": "인바운드 규칙을 더하지 않는다. 0.0.0.0/0 인바운드 금지."
+    }
+   },
+   "Properties": {
+    "GroupDescription": "cs-agent instance - no inbound, egress 443 and 587 only",
+    "VpcId": {
+     "Ref": "Vpc"
+    },
+    "SecurityGroupEgress": [
+     {
+      "IpProtocol": "tcp",
+      "FromPort": 443,
+      "ToPort": 443,
+      "CidrIp": "0.0.0.0/0",
+      "Description": "HTTPS (Claude API, AWS APIs, ECR, dnf)"
+     },
+     {
+      "IpProtocol": "tcp",
+      "FromPort": 587,
+      "ToPort": 587,
+      "CidrIp": "0.0.0.0/0",
+      "Description": "SES SMTP STARTTLS"
+     }
+    ]
+   }
+  },
+  "InstanceRole": {
+   "Type": "AWS::IAM::Role",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "인스턴스가 하는 일만: 수신 큐 읽기·지우기, 원문 읽기, 비밀·설정 읽기, ECR 받기, 로그 쓰기. SSM 접속은 관리형 정책 하나. 모델 호출은 Claude API 키라 AWS 모델 권한이 없다.",
+     "must": "Action 와일드카드 금지. Resource * 는 ecr:GetAuthorizationToken(리소스 지정 불가)에만. 메일 발송·DLQ 재처리 권한을 주지 않는다."
+    }
+   },
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ec2.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole"
+      }
+     ]
+    },
+    "ManagedPolicyArns": [
+     {
+      "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+     }
+    ],
+    "Policies": [
+     {
+      "PolicyName": "cs-agent-instance",
+      "PolicyDocument": {
+       "Version": "2012-10-17",
+       "Statement": [
+        {
+         "Sid": "InboundQueue",
+         "Effect": "Allow",
+         "Action": [
+          "sqs:ReceiveMessage",
+          "sqs:DeleteMessage",
+          "sqs:ChangeMessageVisibility"
+         ],
+         "Resource": {
+          "Fn::GetAtt": [
+           "InboundQueue",
+           "Arn"
+          ]
+         }
+        },
+        {
+         "Sid": "RawMailRead",
+         "Effect": "Allow",
+         "Action": "s3:GetObject",
+         "Resource": {
+          "Fn::Sub": "arn:${AWS::Partition}:s3:::${RawMailBucket}/inbound/*"
+         }
+        },
+        {
+         "Sid": "RawMailList",
+         "Effect": "Allow",
+         "Action": "s3:ListBucket",
+         "Resource": {
+          "Fn::Sub": "arn:${AWS::Partition}:s3:::${RawMailBucket}"
+         }
+        },
+        {
+         "Sid": "Secrets",
+         "Effect": "Allow",
+         "Action": "secretsmanager:GetSecretValue",
+         "Resource": [
+          {
+           "Ref": "InboundSecret"
+          },
+          {
+           "Ref": "ProxySecret"
+          },
+          {
+           "Ref": "AuditSaltSecret"
+          },
+          {
+           "Ref": "ManualSecret"
+          },
+          {
+           "Ref": "AnthropicApiKeySecret"
+          }
+         ]
+        },
+        {
+         "Sid": "Config",
+         "Effect": "Allow",
+         "Action": "ssm:GetParameter",
+         "Resource": {
+          "Fn::Sub": "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigParameter}"
+         }
+        },
+        {
+         "Sid": "EcrAuth",
+         "Effect": "Allow",
+         "Action": "ecr:GetAuthorizationToken",
+         "Resource": "*"
+        },
+        {
+         "Sid": "EcrPull",
+         "Effect": "Allow",
+         "Action": [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchCheckLayerAvailability"
+         ],
+         "Resource": {
+          "Fn::GetAtt": [
+           "Repository",
+           "Arn"
+          ]
+         }
+        },
+        {
+         "Sid": "Logs",
+         "Effect": "Allow",
+         "Action": [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+         ],
+         "Resource": {
+          "Fn::GetAtt": [
+           "LogGroup",
+           "Arn"
+          ]
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  },
+  "InstanceProfile": {
+   "Type": "AWS::IAM::InstanceProfile",
+   "Properties": {
+    "Roles": [
+     {
+      "Ref": "InstanceRole"
+     }
+    ]
+   }
+  },
+  "Instance": {
+   "Type": "AWS::EC2::Instance",
+   "DependsOn": [
+    "PublicRoute",
+    "SubnetRouteTable"
+   ],
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "시작 템플릿 없이 한 대. 스크립트·유닛 본문은 이 Metadata(cfn-init)에 있어 바꿔도 인스턴스가 교체되지 않는다. 갱신은 Run Command 로 cfn-init 을 다시 돌리고 재시작한다(cfn-hup 없음). 설정·비밀은 SSM 파라미터와 Secrets Manager 에서 서비스 시작마다 다시 읽는다.",
+     "must": "UserData 는 바뀌지 않는 이름(스택·리전·리소스 Ref)만 참조한다. 바뀌는 스택 파라미터를 UserData·Init 에 넣지 않는다. 비밀 값을 여기에 쓰지 않는다. cfn-init 은 --role 없이 부른다."
+    },
+    "AWS::CloudFormation::Init": {
+     "config": {
+      "files": {
+       "/etc/cs-agent/stack.json": {
+        "content": {
+         "region": {
+          "Ref": "AWS::Region"
+         },
+         "config": {
+          "Ref": "ConfigParameter"
+         },
+         "manual": {
+          "Ref": "ManualSecret"
+         },
+         "apiKey": {
+          "Ref": "AnthropicApiKeySecret"
+         },
+         "inbound": {
+          "Ref": "InboundSecret"
+         },
+         "proxy": {
+          "Ref": "ProxySecret"
+         },
+         "salt": {
+          "Ref": "AuditSaltSecret"
+         },
+         "queueUrl": {
+          "Ref": "InboundQueue"
+         },
+         "bucket": {
+          "Ref": "RawMailBucket"
+         },
+         "repo": {
+          "Fn::GetAtt": [
+           "Repository",
+           "RepositoryUri"
+          ]
+         }
+        },
+        "mode": "000644",
+        "owner": "root",
+        "group": "root"
+       },
+       "/usr/local/bin/cs-agent-env": {
+        "content": {
+         "Fn::Join": [
+          "\n",
+          [
+           "#!/usr/bin/env python3",
+           "# 서비스가 시작할 때마다(ExecStartPre) SSM 설정과 Secrets Manager 비밀을 다시 읽어",
+           "# /etc/cs-agent/app.env, nginx 설정, htpasswd 를 다시 쓰고 이미지를 받는다. 값은 어디에도 출력하지 않는다.",
+           "import fcntl, grp, json, os, subprocess, sys",
+           "",
+           "lock = open('/run/cs-agent-env.lock', 'w')",
+           "fcntl.flock(lock, fcntl.LOCK_EX)  # 두 유닛의 ExecStartPre 가 겹치면 한쪽씩 돈다",
+           "S = json.load(open('/etc/cs-agent/stack.json'))",
+           "",
+           "NGINX = \"\"\"server {",
+           "    listen 127.0.0.1:8080;",
+           "    client_max_body_size 16m;",
+           "    location / {",
+           "        auth_basic \"cs-agent\";",
+           "        auth_basic_user_file /etc/nginx/cs-agent.htpasswd;",
+           "        proxy_pass http://127.0.0.1:3000;",
+           "        proxy_http_version 1.1;",
+           "        proxy_set_header Host $host;",
+           "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
+           "        proxy_set_header X-Forwarded-User $remote_user;",
+           "        proxy_set_header X-Proxy-Secret \"%s\";",
+           "        proxy_buffering off;",
+           "        proxy_read_timeout 1h;",
+           "    }",
+           "}",
+           "\"\"\"",
+           "",
+           "",
+           "def fail(why):",
+           "    print('cs-agent-env: ' + why, file=sys.stderr)",
+           "    sys.exit(1)",
+           "",
+           "",
+           "def run(args, data=None):",
+           "    r = subprocess.run(args, input=data, capture_output=True, text=True)",
+           "    if r.returncode:",
+           "        raise RuntimeError(' '.join(args[:7]) + ' 실패(' + str(r.returncode) + ')')",
+           "    return r.stdout.strip()",
+           "",
+           "",
+           "def aws(*a):",
+           "    return run(['aws', '--region', S['region'], '--output', 'text', *a])",
+           "",
+           "",
+           "def secret(arn):",
+           "    return aws('secretsmanager', 'get-secret-value', '--secret-id', arn, '--query', 'SecretString')",
+           "",
+           "",
+           "def put(path, text, mode, gid=0):",
+           "    tmp = path + '.tmp'",
+           "    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)",
+           "    with os.fdopen(fd, 'w') as f:",
+           "        f.write(text)",
+           "    os.chown(tmp, 0, gid)",
+           "    os.chmod(tmp, mode)",
+           "    os.replace(tmp, path)  # 읽는 쪽은 옛 파일 아니면 새 파일만 본다",
+           "",
+           "",
+           "try:",
+           "    cfg = json.loads(aws('ssm', 'get-parameter', '--name', S['config'], '--query', 'Parameter.Value'))",
+           "    manual = json.loads(secret(S['manual']))",
+           "    api = json.loads(secret(S['apiKey']))",
+           "    gen = {k: secret(S[k]) for k in ('inbound', 'proxy', 'salt')}",
+           "except (RuntimeError, ValueError) as e:",
+           "    fail('설정·비밀을 읽지 못함: ' + str(e)[:200])",
+           "",
+           "mode = cfg.get('MailMode')",
+           "env = {",
+           "    'NODE_ENV': 'production', 'HOST': '127.0.0.1', 'PORT': '3000',",
+           "    'SIM_URL': 'http://127.0.0.1:3000', 'AUTH_USER_HEADER': 'x-forwarded-user',",
+           "    'DB_PATH': '/app/data/cs-agent.db', 'AUTO_SEND': '0',",
+           "    'LLM_PROVIDER': 'anthropic', 'ANTHROPIC_API_KEY': api.get('ANTHROPIC_API_KEY', ''),",
+           "    'ANTHROPIC_MODEL': cfg.get('AnthropicModel', ''),",
+           "    'LLM_DAILY_TOKEN_BUDGET': cfg.get('LlmDailyBudget', ''),",
+           "    'LLM_PRICE_INPUT_PER_MTOK': cfg.get('PriceInputPerMtok', ''),",
+           "    'LLM_PRICE_OUTPUT_PER_MTOK': cfg.get('PriceOutputPerMtok', ''),",
+           "    'INBOUND_SECRET': gen['inbound'], 'PROXY_SHARED_SECRET': gen['proxy'], 'AUDIT_SALT': gen['salt'],",
+           "    'ADMIN_USERS': cfg.get('AdminUsers', ''), 'SHADOW_CHANNELS': cfg.get('ShadowChannels', ''),",
+           "    'SMTP_FROM': cfg.get('SmtpFrom', ''), 'MAIL_ALLOWED_DOMAINS': cfg.get('MailAllowedDomains', ''),",
+           "    'AWS_REGION': S['region'], 'SES_QUEUE_URL': S['queueUrl'], 'SES_BUCKET': S['bucket'],",
+           "    'SES_PREFIX': 'inbound/', 'SES_CHANNELS': cfg.get('ChannelMap', ''),",
+           "}",
+           "need = ['ANTHROPIC_API_KEY']",
+           "if mode == 'mirror':",
+           "    env.update(MAIL_PROVIDER='mock', ALLOW_MOCK_MAIL='1', SES_MODE='mirror')",
+           "elif mode == 'smtp':",
+           "    env.update(MAIL_PROVIDER='smtp', SMTP_HOST='email-smtp.' + S['region'] + '.amazonaws.com', SMTP_PORT='587',",
+           "               SMTP_USER=manual.get('SMTP_USER', ''), SMTP_PASS=manual.get('SMTP_PASS', ''))",
+           "    need += ['SMTP_USER', 'SMTP_PASS']",
+           "else:",
+           "    fail('MailMode 는 mirror 또는 smtp')",
+           "env = {k: str(v).strip() for k, v in env.items() if str(v).strip()}",
+           "# 이 셋이 빠지면 이미지 기본값(실발송·0.0.0.0)이 살아나므로 항상 있어야 한다",
+           "missing = [k for k in need + ['MAIL_PROVIDER', 'LLM_PROVIDER', 'HOST'] if k not in env]",
+           "if not str(manual.get('BASIC_AUTH', '')).strip():",
+           "    missing.append('BASIC_AUTH')",
+           "if missing:",
+           "    fail('비어 있는 값: ' + ', '.join(missing))  # 이름만 쓴다",
+           "if any('\\n' in v or '\\r' in v for v in env.values()):",
+           "    fail('env 값에 줄바꿈이 있음')",
+           "os.makedirs('/etc/cs-agent', mode=0o700, exist_ok=True)",
+           "put('/etc/cs-agent/app.env', ''.join(k + '=' + v + '\\n' for k, v in sorted(env.items())), 0o600)",
+           "",
+           "users = []",
+           "for entry in str(manual['BASIC_AUTH']).split():",
+           "    user, _, pw = entry.partition(':')",
+           "    if not user or not pw:",
+           "        fail('BASIC_AUTH 형식: 사용자:비밀번호 (여러 명은 공백으로 구분)')",
+           "    users.append(run(['htpasswd', '-niB', user], pw + '\\n').splitlines()[0])",
+           "put('/etc/nginx/cs-agent.htpasswd', '\\n'.join(users) + '\\n', 0o640, grp.getgrnam('nginx').gr_gid)",
+           "put('/etc/nginx/conf.d/cs-agent.conf', NGINX % env['PROXY_SHARED_SECRET'], 0o600)",
+           "run(['systemctl', 'reload-or-restart', 'nginx'])",
+           "",
+           "img = S['repo'] + ':' + str(cfg.get('ImageTag', ''))",
+           "try:",
+           "    run(['docker', 'login', '--username', 'AWS', '--password-stdin', S['repo'].split('/')[0]], aws('ecr', 'get-login-password'))",
+           "    run(['docker', 'pull', '-q', img])",
+           "except RuntimeError:",
+           "    if subprocess.run(['docker', 'image', 'inspect', img], capture_output=True).returncode:",
+           "        fail('이미지를 받지 못했고 이 인스턴스에도 없음: ' + img)",
+           "    print('cs-agent-env: pull 실패, 로컬 이미지로 계속', file=sys.stderr)",
+           "run(['docker', 'tag', img, 'cs-agent:current'])"
+          ]
+         ]
+        },
+        "mode": "000700",
+        "owner": "root",
+        "group": "root"
+       },
+       "/etc/systemd/system/cs-agent.service": {
+        "content": {
+         "Fn::Join": [
+          "\n",
+          [
+           "[Unit]",
+           "Description=cs-agent server",
+           "After=docker.service network-online.target nginx.service",
+           "Wants=network-online.target",
+           "Requires=docker.service",
+           "RequiresMountsFor=/data",
+           "StartLimitIntervalSec=0",
+           "",
+           "[Service]",
+           "TimeoutStartSec=300",
+           "ExecStartPre=/usr/local/bin/cs-agent-env",
+           "ExecStartPre=-/usr/bin/docker rm -f cs-agent",
+           {
+            "Fn::Sub": "ExecStart=/usr/bin/docker run --rm --name cs-agent --network host --env-file /etc/cs-agent/app.env -v /data:/app/data --log-driver awslogs --log-opt awslogs-region=${AWS::Region} --log-opt awslogs-group=${LogGroup} --log-opt awslogs-stream=cs-agent cs-agent:current"
+           },
+           "ExecStop=/usr/bin/docker stop cs-agent",
+           "Restart=on-failure",
+           "RestartSec=30",
+           "",
+           "[Install]",
+           "WantedBy=multi-user.target",
+           ""
+          ]
+         ]
+        },
+        "mode": "000644",
+        "owner": "root",
+        "group": "root"
+       },
+       "/etc/systemd/system/cs-inbound.service": {
+        "content": {
+         "Fn::Join": [
+          "\n",
+          [
+           "[Unit]",
+           "Description=cs-agent SES inbound adapter",
+           "After=docker.service network-online.target nginx.service",
+           "Wants=network-online.target",
+           "Requires=docker.service",
+           "After=cs-agent.service",
+           "StartLimitIntervalSec=0",
+           "",
+           "[Service]",
+           "TimeoutStartSec=300",
+           "ExecStartPre=/usr/local/bin/cs-agent-env",
+           "ExecStartPre=-/usr/bin/docker rm -f cs-inbound",
+           {
+            "Fn::Sub": "ExecStart=/usr/bin/docker run --rm --name cs-inbound --network host --env-file /etc/cs-agent/app.env --log-driver awslogs --log-opt awslogs-region=${AWS::Region} --log-opt awslogs-group=${LogGroup} --log-opt awslogs-stream=cs-inbound cs-agent:current node --no-warnings=ExperimentalWarning scripts/inbound-ses.js"
+           },
+           "ExecStop=/usr/bin/docker stop cs-inbound",
+           "Restart=on-failure",
+           "RestartSec=30",
+           "",
+           "[Install]",
+           "WantedBy=multi-user.target",
+           ""
+          ]
+         ]
+        },
+        "mode": "000644",
+        "owner": "root",
+        "group": "root"
+       }
+      }
+     }
+    }
+   },
+   "Properties": {
+    "ImageId": {
+     "Ref": "AmiId"
+    },
+    "InstanceType": {
+     "Ref": "InstanceType"
+    },
+    "SubnetId": {
+     "Ref": "PublicSubnet"
+    },
+    "SecurityGroupIds": [
+     {
+      "Ref": "InstanceSecurityGroup"
+     }
+    ],
+    "IamInstanceProfile": {
+     "Ref": "InstanceProfile"
+    },
+    "MetadataOptions": {
+     "HttpTokens": "required",
+     "HttpEndpoint": "enabled",
+     "HttpPutResponseHopLimit": 1
+    },
+    "BlockDeviceMappings": [
+     {
+      "DeviceName": "/dev/xvda",
+      "Ebs": {
+       "VolumeType": "gp3",
+       "VolumeSize": 8,
+       "Encrypted": true,
+       "DeleteOnTermination": true
+      }
+     }
+    ],
+    "UserData": {
+     "Fn::Base64": {
+      "Fn::Join": [
+       "\n",
+       [
+        "#!/bin/bash",
+        "# 첫 부팅 한 번만 돈다. 실행 순서만 담고 파일 본문은 AWS::CloudFormation::Init 에 있다.",
+        "set -euxo pipefail",
+        "dnf install -y aws-cfn-bootstrap docker nginx httpd-tools",
+        {
+         "Fn::Sub": "V=${DataVolume}"
+        },
+        "DEV=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${V/-/}",
+        "for i in $(seq 60); do [ -e \"$DEV\" ] && break; sleep 5; done",
+        "[ -e \"$DEV\" ] || { echo \"data volume not attached: $DEV\"; exit 1; }",
+        "[ -n \"$(blkid -o value -s TYPE \"$DEV\" || true)\" ] || mkfs.xfs \"$DEV\"",
+        "UUID=$(blkid -o value -s UUID \"$DEV\")",
+        "mkdir -p /data",
+        "grep -q \"$UUID\" /etc/fstab || echo \"UUID=$UUID /data xfs defaults,nofail 0 2\" >> /etc/fstab",
+        "mountpoint -q /data || mount /data",
+        "chown 1000:1000 /data",
+        {
+         "Fn::Sub": "/opt/aws/bin/cfn-init -v -s ${AWS::StackName} -r Instance --region ${AWS::Region}"
+        },
+        "systemctl daemon-reload",
+        "systemctl enable --now --no-block docker nginx cs-agent cs-inbound",
+        ""
+       ]
+      ]
+     }
+    },
+    "Tags": [
+     {
+      "Key": "Name",
+      "Value": {
+       "Ref": "AWS::StackName"
+      }
+     }
+    ]
+   }
+  },
+  "DataVolume": {
+   "Type": "AWS::EC2::Volume",
+   "DeletionPolicy": "Snapshot",
+   "UpdateReplacePolicy": "Snapshot",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "DB·접속기록·WAL 이 모두 여기 있다. 같은 볼륨 스냅샷이면 크래시 일관 사본이다. 백업 태그 값을 스택 이름으로 두어 같은 계정의 다른 스택 볼륨을 이 정책이 잡지 않게 한다.",
+     "must": "암호화를 끄지 않는다. 지우거나 교체할 때 스냅샷이 남아야 한다. 인스턴스와 같은 AZ."
+    }
+   },
+   "Properties": {
+    "AvailabilityZone": {
+     "Fn::GetAtt": [
+      "PublicSubnet",
+      "AvailabilityZone"
+     ]
+    },
+    "Size": {
+     "Ref": "DataVolumeGiB"
+    },
+    "VolumeType": "gp3",
+    "Encrypted": true,
+    "Tags": [
+     {
+      "Key": "cs-agent-backup",
+      "Value": {
+       "Ref": "AWS::StackName"
+      }
+     },
+     {
+      "Key": "Name",
+      "Value": {
+       "Fn::Sub": "${AWS::StackName}-data"
+      }
+     }
+    ]
+   }
+  },
+  "DataVolumeAttachment": {
+   "Type": "AWS::EC2::VolumeAttachment",
+   "Properties": {
+    "InstanceId": {
+     "Ref": "Instance"
+    },
+    "VolumeId": {
+     "Ref": "DataVolume"
+    },
+    "Device": "/dev/sdf"
+   }
+  },
+  "DlmRole": {
+   "Type": "AWS::IAM::Role",
+   "Properties": {
+    "AssumeRolePolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "dlm.amazonaws.com"
+       },
+       "Action": "sts:AssumeRole"
+      }
+     ]
+    },
+    "ManagedPolicyArns": [
+     {
+      "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole"
+     }
+    ]
+   }
+  },
+  "SnapshotPolicy": {
+   "Type": "AWS::DLM::LifecyclePolicy",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "하루 한 번 18:00 UTC = 한국 시간 03:00(문의가 가장 적은 시간). Times 는 UTC 다."
+    }
+   },
+   "Properties": {
+    "Description": "cs-agent data volume daily snapshot",
+    "State": "ENABLED",
+    "ExecutionRoleArn": {
+     "Fn::GetAtt": [
+      "DlmRole",
+      "Arn"
+     ]
+    },
+    "PolicyDetails": {
+     "PolicyType": "EBS_SNAPSHOT_MANAGEMENT",
+     "ResourceTypes": [
+      "VOLUME"
+     ],
+     "TargetTags": [
+      {
+       "Key": "cs-agent-backup",
+       "Value": {
+        "Ref": "AWS::StackName"
+       }
+      }
+     ],
+     "Schedules": [
+      {
+       "Name": "daily",
+       "CreateRule": {
+        "Interval": 24,
+        "IntervalUnit": "HOURS",
+        "Times": [
+         "18:00"
+        ]
+       },
+       "RetainRule": {
+        "Count": {
+         "Ref": "SnapshotRetainCount"
+        }
+       },
+       "CopyTags": true
+      }
+     ]
+    }
+   }
+  },
+  "RawMailBucket": {
+   "Type": "AWS::S3::Bucket",
+   "DeletionPolicy": "Retain",
+   "UpdateReplacePolicy": "Retain",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "SES 가 원문 MIME 을 inbound/ 아래에 쓴다. 전달용이라 버전 관리를 끄고 RawMailRetentionDays 뒤 지운다. 인스턴스 역할의 조건 없는 ListBucket 은 없는 키를 404 로 받기 위한 것이다.",
+     "must": "이 버킷에 메일 원문 밖의 데이터를 두지 않는다(조건 없는 ListBucket 의 전제). 공개 차단·암호화·TLS 전용을 끄지 않는다."
+    }
+   },
+   "Properties": {
+    "PublicAccessBlockConfiguration": {
+     "BlockPublicAcls": true,
+     "BlockPublicPolicy": true,
+     "IgnorePublicAcls": true,
+     "RestrictPublicBuckets": true
+    },
+    "BucketEncryption": {
+     "ServerSideEncryptionConfiguration": [
+      {
+       "ServerSideEncryptionByDefault": {
+        "SSEAlgorithm": "AES256"
+       }
+      }
+     ]
+    },
+    "OwnershipControls": {
+     "Rules": [
+      {
+       "ObjectOwnership": "BucketOwnerEnforced"
+      }
+     ]
+    },
+    "LifecycleConfiguration": {
+     "Rules": [
+      {
+       "Id": "expire-raw-mail",
+       "Status": "Enabled",
+       "Prefix": "inbound/",
+       "ExpirationInDays": {
+        "Ref": "RawMailRetentionDays"
+       },
+       "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 1
+       }
+      }
+     ]
+    }
+   }
+  },
+  "RawMailBucketPolicy": {
+   "Type": "AWS::S3::BucketPolicy",
+   "Properties": {
+    "Bucket": {
+     "Ref": "RawMailBucket"
+    },
+    "PolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Sid": "AllowSesPut",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ses.amazonaws.com"
+       },
+       "Action": "s3:PutObject",
+       "Resource": {
+        "Fn::Sub": "arn:${AWS::Partition}:s3:::${RawMailBucket}/inbound/*"
+       },
+       "Condition": {
+        "StringEquals": {
+         "AWS:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         },
+         "AWS:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:receipt-rule-set/${AWS::StackName}-inbound:receipt-rule/${AWS::StackName}-inbound"
+         }
+        }
+       }
+      },
+      {
+       "Sid": "DenyInsecureTransport",
+       "Effect": "Deny",
+       "Principal": "*",
+       "Action": "s3:*",
+       "Resource": [
+        {
+         "Fn::Sub": "arn:${AWS::Partition}:s3:::${RawMailBucket}"
+        },
+        {
+         "Fn::Sub": "arn:${AWS::Partition}:s3:::${RawMailBucket}/*"
+        }
+       ],
+       "Condition": {
+        "Bool": {
+         "aws:SecureTransport": "false"
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "InboundTopic": {
+   "Type": "AWS::SNS::Topic",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "SES 수신 알림(머리글 포함)을 큐로 넘긴다. KMS 를 쓰면 SES 게시에 고객 관리형 키와 키 정책이 필요해 쓰지 않는다. 대신 전송 TLS·짧은 보관·큐 SSE 로 받아들인다."
+    }
+   },
+   "Properties": {
+    "DisplayName": "cs-agent inbound"
+   }
+  },
+  "InboundTopicPolicy": {
+   "Type": "AWS::SNS::TopicPolicy",
+   "Properties": {
+    "Topics": [
+     {
+      "Ref": "InboundTopic"
+     }
+    ],
+    "PolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Sid": "AllowSesPublish",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "ses.amazonaws.com"
+       },
+       "Action": "SNS:Publish",
+       "Resource": {
+        "Ref": "InboundTopic"
+       },
+       "Condition": {
+        "StringEquals": {
+         "AWS:SourceAccount": {
+          "Ref": "AWS::AccountId"
+         },
+         "AWS:SourceArn": {
+          "Fn::Sub": "arn:${AWS::Partition}:ses:${AWS::Region}:${AWS::AccountId}:receipt-rule-set/${AWS::StackName}-inbound:receipt-rule/${AWS::StackName}-inbound"
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "DeadLetterQueue": {
+   "Type": "AWS::SQS::Queue",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "독 메시지만 온다(어댑터는 서버 장애 동안 큐를 소모하지 않는다). 표준 큐의 DLQ 보존은 처음 넣은 시각 기준이고 S3 원문도 7일이라 같은 창이다. 재처리는 운영자가 콘솔·CLI 로 한다."
+    }
+   },
+   "Properties": {
+    "SqsManagedSseEnabled": true,
+    "MessageRetentionPeriod": 604800
+   }
+  },
+  "InboundQueue": {
+   "Type": "AWS::SQS::Queue",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "어댑터가 한 번에 한 통씩 긴 폴링으로 받는다. 10번 받아도 처리되지 않으면 DLQ 로 간다."
+    }
+   },
+   "Properties": {
+    "SqsManagedSseEnabled": true,
+    "VisibilityTimeout": 120,
+    "ReceiveMessageWaitTimeSeconds": 20,
+    "MessageRetentionPeriod": 604800,
+    "RedrivePolicy": {
+     "deadLetterTargetArn": {
+      "Fn::GetAtt": [
+       "DeadLetterQueue",
+       "Arn"
+      ]
+     },
+     "maxReceiveCount": 10
+    }
+   }
+  },
+  "InboundQueuePolicy": {
+   "Type": "AWS::SQS::QueuePolicy",
+   "Properties": {
+    "Queues": [
+     {
+      "Ref": "InboundQueue"
+     }
+    ],
+    "PolicyDocument": {
+     "Version": "2012-10-17",
+     "Statement": [
+      {
+       "Sid": "AllowTopic",
+       "Effect": "Allow",
+       "Principal": {
+        "Service": "sns.amazonaws.com"
+       },
+       "Action": "sqs:SendMessage",
+       "Resource": {
+        "Fn::GetAtt": [
+         "InboundQueue",
+         "Arn"
+        ]
+       },
+       "Condition": {
+        "ArnEquals": {
+         "aws:SourceArn": {
+          "Ref": "InboundTopic"
+         }
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "InboundSubscription": {
+   "Type": "AWS::SNS::Subscription",
+   "DependsOn": "InboundQueuePolicy",
+   "Properties": {
+    "TopicArn": {
+     "Ref": "InboundTopic"
+    },
+    "Protocol": "sqs",
+    "Endpoint": {
+     "Fn::GetAtt": [
+      "InboundQueue",
+      "Arn"
+     ]
+    },
+    "RawMessageDelivery": true
+   }
+  },
+  "ReceiptRuleSet": {
+   "Type": "AWS::SES::ReceiptRuleSet",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "활성화는 CloudFormation 속성이 없어 배포 뒤 수동으로 한다(출력의 명령). 활성 세트는 계정·리전당 하나다."
+    }
+   },
+   "Properties": {
+    "RuleSetName": {
+     "Fn::Sub": "${AWS::StackName}-inbound"
+    }
+   }
+  },
+  "ReceiptRule": {
+   "Type": "AWS::SES::ReceiptRule",
+   "DependsOn": [
+    "RawMailBucketPolicy",
+    "InboundTopicPolicy",
+    "InboundSubscription"
+   ],
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "S3 액션이 원문을 저장하고 같은 액션의 SNS 알림이 봉투 수신자·DMARC·바이러스 판정을 큐로 넘긴다. KmsKeyArn 을 쓰면 클라이언트 측 암호화라 어댑터가 읽지 못한다.",
+     "must": "규칙 이름은 버킷·주제 정책의 SourceArn 과 같아야 한다. KmsKeyArn 을 넣지 않는다."
+    }
+   },
+   "Properties": {
+    "RuleSetName": {
+     "Ref": "ReceiptRuleSet"
+    },
+    "Rule": {
+     "Name": {
+      "Fn::Sub": "${AWS::StackName}-inbound"
+     },
+     "Enabled": true,
+     "ScanEnabled": true,
+     "TlsPolicy": "Require",
+     "Recipients": {
+      "Ref": "InboundAddresses"
+     },
+     "Actions": [
+      {
+       "S3Action": {
+        "BucketName": {
+         "Ref": "RawMailBucket"
+        },
+        "ObjectKeyPrefix": "inbound/",
+        "TopicArn": {
+         "Ref": "InboundTopic"
+        }
+       }
+      }
+     ]
+    }
+   }
+  },
+  "MailDomainIdentity": {
+   "Type": "AWS::SES::EmailIdentity",
+   "Properties": {
+    "EmailIdentity": {
+     "Ref": "MailDomain"
+    }
+   }
+  },
+  "MirrorDomainIdentity": {
+   "Type": "AWS::SES::EmailIdentity",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "수신에 쓰는 도메인도 identity 로 검증해야 한다. 미러 동안 주 도메인 MX 는 그대로 두고 이 하위 도메인만 SES 로 받는다."
+    }
+   },
+   "Properties": {
+    "EmailIdentity": {
+     "Ref": "MirrorDomain"
+    }
+   }
+  },
+  "InboundSecret": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Name": {
+     "Fn::Sub": "${AWS::StackName}/inbound-secret"
+    },
+    "Description": "INBOUND_SECRET",
+    "GenerateSecretString": {
+     "PasswordLength": 48,
+     "ExcludePunctuation": true
+    }
+   }
+  },
+  "ProxySecret": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Name": {
+     "Fn::Sub": "${AWS::StackName}/proxy-secret"
+    },
+    "Description": "PROXY_SHARED_SECRET",
+    "GenerateSecretString": {
+     "PasswordLength": 48,
+     "ExcludePunctuation": true
+    }
+   }
+  },
+  "AuditSaltSecret": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Properties": {
+    "Name": {
+     "Fn::Sub": "${AWS::StackName}/audit-salt"
+    },
+    "Description": "AUDIT_SALT",
+    "GenerateSecretString": {
+     "PasswordLength": 48,
+     "ExcludePunctuation": true
+    }
+   }
+  },
+  "ManualSecret": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "사람이 콘솔에서 넣는 값. 빈 자리 값으로 버전을 만들어 두고, 서비스는 값이 찰 때까지 30초마다 다시 시작하며 기다린다. BASIC_AUTH 는 \"사용자:비밀번호\"(여러 명은 공백).",
+     "must": "자리 값을 템플릿에서 바꾸지 않는다(스택 갱신이 운영자가 넣은 값을 덮는다). 키를 더할 때는 콘솔에서 한다."
+    }
+   },
+   "Properties": {
+    "Name": {
+     "Fn::Sub": "${AWS::StackName}/manual"
+    },
+    "Description": "SMTP_USER, SMTP_PASS, BASIC_AUTH",
+    "SecretString": "{\"SMTP_USER\":\"\",\"SMTP_PASS\":\"\",\"BASIC_AUTH\":\"\"}"
+   }
+  },
+  "AnthropicApiKeySecret": {
+   "Type": "AWS::SecretsManager::Secret",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "Claude API 키. 스택 파라미터·user data·이미지에 두지 않고 여기에만 둔다. 키 교체는 콘솔에서 값을 바꾸고 재시작한다.",
+     "must": "자리 값을 템플릿에서 바꾸지 않는다(스택 갱신이 넣은 키를 덮는다)."
+    }
+   },
+   "Properties": {
+    "Name": {
+     "Fn::Sub": "${AWS::StackName}/anthropic-api-key"
+    },
+    "Description": "ANTHROPIC_API_KEY",
+    "SecretString": "{\"ANTHROPIC_API_KEY\":\"\"}"
+   }
+  },
+  "ConfigParameter": {
+   "Type": "AWS::SSM::Parameter",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "바뀌는 설정은 이 파라미터 하나에만 나온다. 스택 파라미터를 바꾸면 이 값만 바뀌고 인스턴스는 그대로다. 반영은 재시작.",
+     "must": "비밀을 넣지 않는다(String 파라미터)."
+    }
+   },
+   "Properties": {
+    "Name": {
+     "Fn::Sub": "/${AWS::StackName}/config"
+    },
+    "Type": "String",
+    "Description": "cs-agent runtime config (no secrets)",
+    "Value": {
+     "Fn::Sub": "{\"MailMode\":\"${MailMode}\",\"ChannelMap\":\"${ChannelMap}\",\"ShadowChannels\":\"${ShadowChannels}\",\"AdminUsers\":\"${AdminUsers}\",\"SmtpFrom\":\"${SmtpFrom}\",\"MailAllowedDomains\":\"${MailAllowedDomains}\",\"AnthropicModel\":\"${AnthropicModel}\",\"LlmDailyBudget\":\"${LlmDailyBudget}\",\"PriceInputPerMtok\":\"${PriceInputPerMtok}\",\"PriceOutputPerMtok\":\"${PriceOutputPerMtok}\",\"ImageTag\":\"${ImageTag}\"}"
+    }
+   }
+  },
+  "Repository": {
+   "Type": "AWS::ECR::Repository",
+   "DeletionPolicy": "Retain",
+   "UpdateReplacePolicy": "Retain",
+   "Properties": {
+    "ImageTagMutability": "IMMUTABLE",
+    "ImageScanningConfiguration": {
+     "ScanOnPush": true
+    },
+    "EncryptionConfiguration": {
+     "EncryptionType": "AES256"
+    }
+   }
+  },
+  "LogGroup": {
+   "Type": "AWS::Logs::LogGroup",
+   "Properties": {
+    "RetentionInDays": 30
+   }
+  },
+  "PausedMetricFilter": {
+   "Type": "AWS::Logs::MetricFilter",
+   "Properties": {
+    "LogGroupName": {
+     "Ref": "LogGroup"
+    },
+    "FilterPattern": "\"[ses] 정지\"",
+    "MetricTransformations": [
+     {
+      "MetricNamespace": {
+       "Fn::Sub": "CsAgent/${AWS::StackName}"
+      },
+      "MetricName": "InboundPaused",
+      "MetricValue": "1"
+     }
+    ]
+   }
+  },
+  "ServerErrorMetricFilter": {
+   "Type": "AWS::Logs::MetricFilter",
+   "Properties": {
+    "LogGroupName": {
+     "Ref": "LogGroup"
+    },
+    "FilterPattern": "?\"[http]\" ?\"[loop]\" ?\"[recover]\" ?\"시작 거부\"",
+    "MetricTransformations": [
+     {
+      "MetricNamespace": {
+       "Fn::Sub": "CsAgent/${AWS::StackName}"
+      },
+      "MetricName": "ServerErrors",
+      "MetricValue": "1"
+     }
+    ]
+   }
+  },
+  "AlarmTopic": {
+   "Type": "AWS::SNS::Topic",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "경보 알림 전용(메일 내용 없음). CloudWatch 가 AWS 관리형 키로 암호화된 주제에는 게시하지 못해 암호화하지 않는다."
+    }
+   },
+   "Properties": {
+    "DisplayName": "cs-agent alarms"
+   }
+  },
+  "AlarmEmailSubscription": {
+   "Type": "AWS::SNS::Subscription",
+   "Condition": "HasAlarmEmail",
+   "Properties": {
+    "TopicArn": {
+     "Ref": "AlarmTopic"
+    },
+    "Protocol": "email",
+    "Endpoint": {
+     "Ref": "AlarmEmail"
+    }
+   }
+  },
+  "DeadLetterAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmDescription": "DLQ 에 메시지가 있다. 7일 안에 원인을 보고 재처리한다.",
+    "Namespace": "AWS/SQS",
+    "MetricName": "ApproximateNumberOfMessagesVisible",
+    "Dimensions": [
+     {
+      "Name": "QueueName",
+      "Value": {
+       "Fn::GetAtt": [
+        "DeadLetterQueue",
+        "QueueName"
+       ]
+      }
+     }
+    ],
+    "Statistic": "Maximum",
+    "Period": 300,
+    "EvaluationPeriods": 1,
+    "Threshold": 0,
+    "ComparisonOperator": "GreaterThanThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "AlarmTopic"
+     }
+    ]
+   }
+  },
+  "InboundPausedAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmDescription": "수신 어댑터가 설정 오류로 멈췄다.",
+    "Namespace": {
+     "Fn::Sub": "CsAgent/${AWS::StackName}"
+    },
+    "MetricName": "InboundPaused",
+    "Statistic": "Sum",
+    "Period": 300,
+    "EvaluationPeriods": 1,
+    "Threshold": 0,
+    "ComparisonOperator": "GreaterThanThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "AlarmTopic"
+     }
+    ]
+   }
+  },
+  "ServerErrorAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Properties": {
+    "AlarmDescription": "서버 오류 로그 줄이 생겼다.",
+    "Namespace": {
+     "Fn::Sub": "CsAgent/${AWS::StackName}"
+    },
+    "MetricName": "ServerErrors",
+    "Statistic": "Sum",
+    "Period": 300,
+    "EvaluationPeriods": 1,
+    "Threshold": 0,
+    "ComparisonOperator": "GreaterThanThreshold",
+    "TreatMissingData": "notBreaching",
+    "AlarmActions": [
+     {
+      "Ref": "AlarmTopic"
+     }
+    ]
+   }
+  },
+  "RecoverAlarm": {
+   "Type": "AWS::CloudWatch::Alarm",
+   "Metadata": {
+    "com.aws.cloudformation.Context": {
+     "why": "단일 인스턴스의 하드웨어 장애를 사람 없이 복구한다(같은 인스턴스 id·볼륨)."
+    }
+   },
+   "Properties": {
+    "AlarmDescription": "시스템 상태 검사 실패 → EC2 자동 복구",
+    "Namespace": "AWS/EC2",
+    "MetricName": "StatusCheckFailed_System",
+    "Dimensions": [
+     {
+      "Name": "InstanceId",
+      "Value": {
+       "Ref": "Instance"
+      }
+     }
+    ],
+    "Statistic": "Minimum",
+    "Period": 60,
+    "EvaluationPeriods": 2,
+    "Threshold": 0,
+    "ComparisonOperator": "GreaterThanThreshold",
+    "AlarmActions": [
+     {
+      "Fn::Sub": "arn:${AWS::Partition}:automate:${AWS::Region}:ec2:recover"
+     },
+     {
+      "Ref": "AlarmTopic"
+     }
+    ]
+   }
+  }
+ },
+ "Outputs": {
+  "InstanceId": {
+   "Value": {
+    "Ref": "Instance"
+   }
+  },
+  "PortForwardCommand": {
+   "Description": "운영 화면(브라우저 http://127.0.0.1:8080)",
+   "Value": {
+    "Fn::Sub": "aws ssm start-session --region ${AWS::Region} --target ${Instance} --document-name AWS-StartPortForwardingSession --parameters portNumber=8080,localPortNumber=8080"
+   }
+  },
+  "RestartCommand": {
+   "Description": "설정·비밀·이미지 태그 반영",
+   "Value": {
+    "Fn::Sub": "aws ssm send-command --region ${AWS::Region} --instance-ids ${Instance} --document-name AWS-RunShellScript --parameters commands=\"systemctl restart cs-agent cs-inbound\""
+   }
+  },
+  "ReinitCommand": {
+   "Description": "Init 파일(스크립트·유닛) 갱신 뒤",
+   "Value": {
+    "Fn::Sub": "aws ssm send-command --region ${AWS::Region} --instance-ids ${Instance} --document-name AWS-RunShellScript --parameters commands=\"/opt/aws/bin/cfn-init -v -s ${AWS::StackName} -r Instance --region ${AWS::Region} && systemctl daemon-reload && systemctl restart cs-agent cs-inbound\""
+   }
+  },
+  "RawMailBucketName": {
+   "Value": {
+    "Ref": "RawMailBucket"
+   }
+  },
+  "InboundQueueUrl": {
+   "Value": {
+    "Ref": "InboundQueue"
+   }
+  },
+  "DeadLetterQueueUrl": {
+   "Value": {
+    "Ref": "DeadLetterQueue"
+   }
+  },
+  "InboundTopicArn": {
+   "Value": {
+    "Ref": "InboundTopic"
+   }
+  },
+  "ReceiptRuleSetName": {
+   "Value": {
+    "Ref": "ReceiptRuleSet"
+   }
+  },
+  "ActivateRuleSetCommand": {
+   "Description": "먼저 describe-active-receipt-rule-set 으로 다른 세트가 활성인지 본다(계정·리전당 하나)",
+   "Value": {
+    "Fn::Sub": "aws ses set-active-receipt-rule-set --region ${AWS::Region} --rule-set-name ${ReceiptRuleSet}"
+   }
+  },
+  "MirrorDomainMx": {
+   "Value": {
+    "Fn::Sub": "${MirrorDomain} MX 10 inbound-smtp.${AWS::Region}.amazonaws.com"
+   }
+  },
+  "MailDomainDkim": {
+   "Value": {
+    "Fn::Sub": "${MailDomainIdentity.DkimDNSTokenName1} CNAME ${MailDomainIdentity.DkimDNSTokenValue1} ; ${MailDomainIdentity.DkimDNSTokenName2} CNAME ${MailDomainIdentity.DkimDNSTokenValue2} ; ${MailDomainIdentity.DkimDNSTokenName3} CNAME ${MailDomainIdentity.DkimDNSTokenValue3}"
+   }
+  },
+  "MirrorDomainDkim": {
+   "Value": {
+    "Fn::Sub": "${MirrorDomainIdentity.DkimDNSTokenName1} CNAME ${MirrorDomainIdentity.DkimDNSTokenValue1} ; ${MirrorDomainIdentity.DkimDNSTokenName2} CNAME ${MirrorDomainIdentity.DkimDNSTokenValue2} ; ${MirrorDomainIdentity.DkimDNSTokenName3} CNAME ${MirrorDomainIdentity.DkimDNSTokenValue3}"
+   }
+  },
+  "EcrUri": {
+   "Value": {
+    "Fn::GetAtt": [
+     "Repository",
+     "RepositoryUri"
+    ]
+   }
+  },
+  "ManualSecretName": {
+   "Value": {
+    "Fn::Sub": "${AWS::StackName}/manual"
+   }
+  },
+  "AnthropicApiKeySecretName": {
+   "Value": {
+    "Fn::Sub": "${AWS::StackName}/anthropic-api-key"
+   }
+  }
+ }
+}
