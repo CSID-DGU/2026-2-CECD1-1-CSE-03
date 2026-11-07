@@ -530,7 +530,7 @@ function renderBoard() {
       ondragover: (e) => { if (S.dragId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; } }, // 안 되는 칸에도 놓게 둔다 — 놓으면 이유를 알린다
       ondrop: (e) => { e.preventDefault(); const id = S.dragId || e.dataTransfer.getData('text/plain'); endDrag(); if (id) boardMove(id, key); },
     },
-    h('h3', { class: 'kcol-head', id: `kcol-${i}`, title: PATH_MOVES[key] ? null : PATH_WHY[key] }, h('span', { text: name }), h('span', { class: 'count', text: String(n) })),
+    h('h3', { class: 'kcol-head', id: `kcol-${i}`, title: PATH_MOVES[key] ? null : PATH_WHY[key] }, h('span', { class: 'kpill' }, h('span', { class: 'kdot', 'aria-hidden': 'true' }), h('span', { text: name })), h('span', { class: 'count', text: String(n) })),
     cards.length ? h('ol', { class: 'kcards' }, cards.map(kanbanCard)) : h('p', { class: 'kcol-empty', text: '없음' }),
     key === 'Closed' && n > cards.length
       ? h('button', { type: 'button', class: 'btn btn-sm btn-ghost kcol-more', onclick: () => setBoard('list', { status: 'Closed', subStatus: '' }) }, `더 보기 (${n - cards.length}건 목록에서)`)
@@ -566,13 +566,16 @@ function kanbanCard(c) {
       ondragstart: (e) => { S.dragId = c.id; e.dataTransfer.setData('text/plain', c.id); e.dataTransfer.effectAllowed = 'move'; e.currentTarget.classList.add('dragging'); markDropTargets(c); },
       ondragend: endDrag,
     },
-    h('span', { class: 'kcard-top' }, h('span', { text: c.caseNumber || shortId(c.id) }), c.priority === 'High' ? priorityText(c.priority) : null),
+    // 노션 보드 카드: 제목 → 고객 → 속성 칩(유형·사유·우선순위·담당·세부 상태) → 번호·시간
     h('span', { class: 'kcard-subj', text: c.subject || '(제목 없음)' }),
     h('span', { class: 'kcard-who' }, whoCell(c)),
-    c.subStatus === 'Waiting on Customer' ? h('span', { class: 'kcard-note', text: label('subStatus', c.subStatus) }) : null,
-    h('span', { class: 'kcard-meta', text: [label('caseType', c.caseType), label('caseReason', c.caseReason)].filter(Boolean).join(' · ') || '–' }),
+    h('span', { class: 'kprops' },
+      [label('caseType', c.caseType), label('caseReason', c.caseReason)].filter(Boolean).map((t) => h('span', { class: 'kchip', text: t })),
+      c.priority === 'High' ? h('span', { class: 'kchip kchip-high', text: label('priority', c.priority) }) : null,
+      h('span', { class: `kchip kchip-owner${c.owner && c.owner.type === 'agent' ? '' : ' human'}`, text: ownerText(c.owner) }),
+      c.subStatus === 'Waiting on Customer' ? h('span', { class: 'kchip kchip-wait', text: label('subStatus', c.subStatus) }) : null),
     isLive(c.id) ? h('span', { class: 'kcard-live' }, liveMark()) : null,
-    h('span', { class: 'kcard-meta' }, h('span', { text: ownerText(c.owner) }), h('span', { text: relTime(when), title: when || '' }))));
+    h('span', { class: 'kcard-top' }, h('span', { text: c.caseNumber || shortId(c.id) }), h('span', { text: relTime(when), title: when || '' }))));
 }
 /** 끄는 동안 이 카드가 갈 수 있는 칸은 표시하고 나머지는 흐리게(같은 표로 미리 계산 — 최종 판단은 놓은 뒤 서버 actions). */
 function markDropTargets(c) {
