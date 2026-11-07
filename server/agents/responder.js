@@ -1,6 +1,26 @@
 'use strict';
 // 응대 에이전트 — ResponderResult(spec §3.1). 본문만 쓴다. violations가 있으면 재작성 모드.
+const db = require('../db');
 const { persona, factsBlock, historyBlock, decisionsBlock, promptSource, call } = require('./common');
+
+// 이미 보낸 답과 이 이상 비슷하면 같은 답으로 본다(공백·문장부호를 뺀 글자 2-gram Dice). 같은 KB 절을 고쳐 쓴 정도까지 잡는다.
+const REPEAT_MIN = 0.85;
+const norm = (s) => String(s || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+function similarity(a, b) {
+  const x = norm(a); const y = norm(b);
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  if (x.length < 2 || y.length < 2) return 0;
+  const grams = new Map();
+  for (let i = 0; i < x.length - 1; i += 1) { const g = x.slice(i, i + 2); grams.set(g, (grams.get(g) || 0) + 1); }
+  let hit = 0;
+  for (let i = 0; i < y.length - 1; i += 1) { const g = y.slice(i, i + 2); const n = grams.get(g); if (n) { hit += 1; grams.set(g, n - 1); } }
+  return (2 * hit) / (x.length + y.length - 2);
+}
+// 이 케이스에서 에이전트가 이미 보낸 답 — 실제로 나간 본문과 그 초안 원문(사람이 고쳐 보냈으면 둘이 다르다)
+// 같은 문의 유형(intent)으로 이미 나간 답(에이전트 원문·사람이 고쳐 보낸 본문) — 다른 유형의 답은 문장 틀이 같아도 비교하지 않는다(환불 안내 ≠ 교환 안내)
+const sentAnswers = (caseId, intent) => db.all(`SELECT original_body a, final_body b FROM drafts WHERE case_id=? AND status='SENT' AND intent IS ?
+  AND COALESCE(action, '') NOT IN ('HUMAN_REPLY','ACK')`, caseId, intent ?? null).flatMap((r) => [r.a, r.b]).filter(Boolean);
 
 const SCHEMA = {
   type: 'object',
@@ -64,7 +84,13 @@ const SOURCE = promptSource('responder', system, user);
 
 async function run(ctx) {
   const out = await call({ agent: 'responder', system: system(ctx.pack), user: user(ctx), schema: SCHEMA, ctx, source: SOURCE });
-  return { ...out, result: normalize(out.result) };
+  const result = normalize(out.result);
+  // 이 케이스에 같은 유형으로 이미 보낸 답과 (거의) 같으면 다시 내지 않는다 — 인수·반환 뒤 같은 질문이 다시 오면 같은 답이 또 나가던 경로.
+  // 본문을 비우고 사람에게: 첫 작성이면 needsHandoff(no_progress = 같은 질문 반복)로 바로 넘김, 재작성이면 빈 본문이라 검사 실패 넘김이 된다.
+  if (result.body && ctx.caseId && sentAnswers(ctx.caseId, ctx.triage?.intent).some((b) => similarity(b, result.body) >= REPEAT_MIN)) {
+    return { ...out, result: { ...result, body: null, needsHandoff: true, handoffReason: 'no_progress', repeatsSent: true } };
+  }
+  return { ...out, result };
 }
 
 module.exports = { run, SCHEMA };

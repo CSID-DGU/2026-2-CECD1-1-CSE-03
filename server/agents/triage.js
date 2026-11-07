@@ -25,7 +25,8 @@ const SCHEMA = {
 const system = (pack) => `${persona('triage')}
 
 채널: ${pack.label}
-고를 수 있는 intent(등급 — H는 사람 전용, L1은 초안 가능): ${Object.entries(pack.intents).map(([k, v]) => `${k}(${v.level || '-'})`).join(', ')}
+고를 수 있는 intent(등급 — H는 사람 전용, L1은 초안 가능. 설명이 있으면 그 설명으로 고른다):
+${Object.entries(pack.intents).map(([k, v]) => `- ${k}(${v.level || '-'})${v.description ? `: ${v.description}` : ''}`).join('\n')}
 handoffReason으로 쓸 수 있는 값: ${pack.handoffReasons.join(', ')} — 사람 신호가 없으면 null.
 kbSections에는 답에 쓸 지식 베이스 절 이름만(kb: 접두어 없이). handoff·ack·ignore면 kbHit "false", kbSections 빈 배열.
 language는 고객 메시지의 언어(ko|en). 이 채널이 받는 언어: ${(pack.languages || ['ko']).join(', ')}.
@@ -76,4 +77,4 @@ async function run(ctx) {
   return { ...out, result: normalize(out.result) };
 }
 
-module.exports = { run, SCHEMA, normalize };
+module.exports = { run, SCHEMA, normalize, SOURCE };

@@ -34,6 +34,7 @@ async function attempt(p, req) {
 async function json(req) {
   const p = providers[name()];
   if (!p) throw new Error(`알 수 없는 LLM_PROVIDER: ${name()}`);
+  if (req.breaker === false) return attempt(p, req); // 변환 같은 긴 작업: 전역 차단기를 보지도, 실패를 세지도 않는다
   if (Date.now() < breaker.openUntil) { const e = new Error('llm_unavailable'); e.code = 'llm_unavailable'; throw e; }
   if (breaker.openUntil) { breaker.openUntil = 0; breaker.halfOpen = true; } // 열린 시간이 지나면 한 번 시험해 본다
   try {
@@ -47,7 +48,13 @@ async function json(req) {
   }
 }
 
+/** provider가 입력 토큰을 셀 수 있으면 그 수, 아니면 null (mock 등). */
+const countTokens = async (req) => {
+  const p = providers[name()];
+  return p && p.countTokens ? p.countTokens(req) : null;
+};
+
 /** ok | degraded(최근 실패 있음) | open(차단 중) */
 const health = () => (Date.now() < breaker.openUntil ? 'open' : (breaker.failures > 0 || breaker.halfOpen ? 'degraded' : 'ok'));
 
-module.exports = { json, name, use, health, breaker };
+module.exports = { json, countTokens, name, use, health, breaker };

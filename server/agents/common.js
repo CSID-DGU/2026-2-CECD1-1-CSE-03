@@ -5,6 +5,7 @@ const path = require('node:path');
 const llm = require('../llm');
 const db = require('../db');
 const { sha } = require('../kb');
+const report = require('../report');
 
 const PERSONAS_PATH = path.join(__dirname, 'personas.md');
 const personas = (() => {
@@ -38,15 +39,41 @@ const decisionsBlock = (recent = []) => (recent.length
 /** 프롬프트 버전 = 템플릿 원본(페르소나 + system·user 템플릿 함수 소스)의 해시. 렌더 결과가 아니라 "어떤 프롬프트였나"를 가리킨다. */
 const promptSource = (agent, ...fns) => [persona(agent), ...fns.map((f) => f.toString())].join('\n---\n');
 
+let budgetWarnedDay = null;
+
 /**
- * LLM 호출 + 소요 시간 + 프롬프트 버전. ctx는 mock provider가 쓴다(규칙 기반이라 구조화 입력 필요).
+ * LLM 호출 + 소요 시간 + 프롬프트 버전 + 사용량. ctx는 mock provider가 쓴다(규칙 기반이라 구조화 입력 필요).
+ * 일일 토큰 예산(LLM_DAILY_TOKEN_BUDGET)을 다 쓴 날은 부르지 않고 code 'llm_budget'으로 던진다 — 루프가 재시도 없이 넘긴다.
+ * 단순화: 예산 조회와 호출 사이가 원자적이지 않아 동시 회차가 있으면 예산을 몇 호출 넘길 수 있다.
+ * 호출마다 성공·실패 모두 llm_calls 한 행(오류는 코드·HTTP 상태만 — 응답 본문은 넣지 않는다).
+ * 단순화: provider 재시도 1회(llm/index.js)는 같은 meta를 덮어써 앞 시도의 토큰은 세지 않는다.
  */
-async function call({ agent, system, user, schema, ctx, source }) {
+async function call({ agent, system, user, schema, ctx, source, maxTokens, timeoutMs, effort, breaker }) {
   const promptVersion = sha(source);
   db.saveVersion(promptVersion, `prompt:${agent}`, source);
+  const b = report.budget();
+  if (b.limit != null && b.used >= b.limit) {
+    const day = db.now().slice(0, 10);
+    if (budgetWarnedDay !== day) { budgetWarnedDay = day; console.warn(`[llm] 일일 토큰 예산 소진(${b.used}/${b.limit}) — 오늘(UTC) 남은 회차는 LLM 없이 담당자에게 넘긴다`); }
+    throw Object.assign(new Error('llm_budget'), { code: 'llm_budget' });
+  }
+  const meta = {};
   const t0 = Date.now();
-  const result = await llm.json({ agent, system, user, schema, ctx });
-  return { result, latencyMs: Date.now() - t0, promptVersion };
+  let error = null;
+  try {
+    // maxTokens·timeoutMs·effort·breaker는 넘긴 호출만 provider로 간다(기존 호출자의 요청 모양은 그대로).
+    const extra = Object.fromEntries(Object.entries({ maxTokens, timeoutMs, effort, breaker }).filter(([, v]) => v !== undefined));
+    const result = await llm.json({ agent, system, user, schema, ctx, meta, ...extra });
+    return { result, latencyMs: Date.now() - t0, promptVersion, usage: meta };
+  } catch (e) {
+    error = String(e?.code || e?.status || e?.name || 'error');
+    throw e;
+  } finally {
+    db.insert('llm_calls', {
+      id: db.uuid(), case_id: ctx?.caseId, message_id: ctx?.messageId, agent, provider: llm.name(), model: meta.model,
+      input_tokens: meta.inputTokens || 0, output_tokens: meta.outputTokens || 0, latency_ms: Date.now() - t0, ok: error ? 0 : 1, error, created_at: db.now(),
+    });
+  }
 }
 
 module.exports = { persona, factsBlock, historyBlock, decisionsBlock, promptSource, call, sha };

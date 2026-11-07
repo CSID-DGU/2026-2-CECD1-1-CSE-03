@@ -119,6 +119,21 @@ function brief(ctx) {
   };
 }
 
+// 매뉴얼 변환: 머리말(#)마다 절 하나. PDF는 자리표시 절 하나. 결정적이다.
+function convert(ctx) {
+  const c = ctx.convert || {};
+  if (c.pdf) return { sections: [{ key: 'mock_pdf', title: '목업 변환 — PDF는 실제 LLM에서만 읽는다', sourceRef: 'p.1', body: '목업 변환 — PDF는 실제 LLM에서만 읽는다.', validUntil: null }], omitted: [] };
+  const parts = [];
+  for (const line of String(c.text || '').split('\n')) {
+    const h = line.match(/^#{1,6}\s+(.*)$/);
+    if (h) parts.push({ title: h[1].trim(), lines: [] });
+    else { if (!parts.length) parts.push({ title: c.ref || '본문', lines: [] }); parts[parts.length - 1].lines.push(line); }
+  }
+  const sections = parts.map((p) => ({ title: p.title, body: p.lines.join('\n').trim() })).filter((p) => p.body)
+    .map((p, i) => ({ key: `s${c.index || 1}_${i + 1}`, title: p.title, sourceRef: p.title, body: p.body.slice(0, 1200), validUntil: null }));
+  return { sections, omitted: [] };
+}
+
 async function json({ agent, ctx }) {
   if (process.env.LLM_MOCK_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.LLM_MOCK_DELAY_MS)));
   switch (agent) {
@@ -126,6 +141,7 @@ async function json({ agent, ctx }) {
     case 'responder': return respond(ctx);
     case 'reviewer': return review(ctx);
     case 'briefer': return brief(ctx);
+    case 'kb_convert': return convert(ctx);
     default: throw new Error(`mock: 알 수 없는 agent ${agent}`);
   }
 }
