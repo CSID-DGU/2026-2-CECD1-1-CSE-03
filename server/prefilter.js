@@ -33,18 +33,27 @@ const RULES = [
   ['list_request', /리스트\s*업[^.\n?]{0,8}(요청|부탁)/],
 ];
 
+/** 자동 회신·빈 본문(body = 인용 뺀 본문). 회차는 IGNORE(auto_reply_or_empty)로 끝내고, 종결 케이스에 붙은 이런 메일은 케이스를 다시 열지 않는다(cases.addInbound). */
+const isAutoReply = ({ body, subject, autoSubmitted = false }) => {
+  const t = String(body || '').trim();
+  return !t || autoSubmitted || AUTO_MARK_RE.test(subject || '') || (t.length <= AUTO_BODY_MAX && AUTO_MARK_RE.test(t));
+};
+
 const domainOf = (s) => (String(s || '').match(/[\w.+-]+@([\w-]+\.[\w.-]+)/) || [])[1]?.toLowerCase();
 
 /**
- * @param {{body, subject?, sender?, pack, autoSubmitted?: boolean, senderChanged?: boolean}} p
+ * @param {{body, subject?, sender?, pack, autoSubmitted?: boolean, senderChanged?: boolean, senderAuth?: string|null, formUnresolved?: boolean}} p
+ *   senderAuth = 수신 때 저장한 발신자 인증 결과, formUnresolved = 문의 폼 메일인데 고객 주소를 못 뽑음
  * @returns {{action:'IGNORE'|'HANDOFF', reason:string} | null} null = 규칙 통과 → LLM 분류로
  */
-function check({ body, subject, sender, pack, autoSubmitted = false, senderChanged = false, internalDomains = (process.env.INTERNAL_DOMAINS || '').split(',').filter(Boolean) }) {
+function check({ body, subject, sender, pack, autoSubmitted = false, senderChanged = false, senderAuth = null, formUnresolved = false, internalDomains = (process.env.INTERNAL_DOMAINS || '').split(',').filter(Boolean) }) {
   const text = String(body || '');
-  if (!text.trim()) return { action: 'IGNORE', reason: 'auto_reply_or_empty' };
-  if (autoSubmitted || AUTO_MARK_RE.test(subject || '') || (text.trim().length <= AUTO_BODY_MAX && AUTO_MARK_RE.test(text))) return { action: 'IGNORE', reason: 'auto_reply_or_empty' };
+  if (isAutoReply({ body: text, subject, autoSubmitted })) return { action: 'IGNORE', reason: 'auto_reply_or_empty' };
   const dom = domainOf(sender);
   if (dom && internalDomains.map((d) => d.trim().toLowerCase()).includes(dom)) return { action: 'IGNORE', reason: 'internal_sender' };
+  // 발신자 인증 실패(위조 의심)와 답할 주소를 모르는 폼 메일은 팩·설정과 무관하게 사람에게 — 회사 명의 메일이 엉뚱한 주소로 가지 않게.
+  if (senderAuth === 'fail') return { action: 'HANDOFF', reason: 'sender_unverified' };
+  if (formUnresolved) return { action: 'HANDOFF', reason: 'unclear' };
   const allowed = new Set(pack?.handoffReasons || [...RULES.map(([r]) => r), 'sender_changed']);
   // 같은 스레드에 다른 주소가 끼어들면 그 사람이 누구인지 사람이 확인한다.
   if (senderChanged && allowed.has('sender_changed')) return { action: 'HANDOFF', reason: 'sender_changed' };
@@ -52,4 +61,4 @@ function check({ body, subject, sender, pack, autoSubmitted = false, senderChang
   return null;
 }
 
-module.exports = { check, RULES, AUTO_MARK_RE };
+module.exports = { check, isAutoReply, RULES, AUTO_MARK_RE };

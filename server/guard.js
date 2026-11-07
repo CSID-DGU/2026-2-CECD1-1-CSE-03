@@ -10,9 +10,86 @@ const LINK_RE = new RegExp(String.raw`https?:\/\/[\x21-\x7e]+|(?<![\w@./-])(?:ww
 const EMOJI_RE = /(?![©®™])\p{Extended_Pictographic}/u;
 
 // 연락처 — 이메일, 휴대폰(+82·공백·하이픈·붙여 쓰기), 지역번호, 대표번호(1588-xxxx 등)
-const CONTACT_SRC = String.raw`[\w.+-]+@[\w-]+(?:\.[\w-]+)+|(?<![\w-])(?:\+?82[-\s.]?)?0?1[016789][-\s.]?\d{3,4}[-\s.]?\d{4}(?!\w)|(?<![\w-])0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\w)|(?<![\w-])1[5-9]\d{2}[-\s.]?\d{4}(?!\w)`;
+const CONTACT_SRC = String.raw`(?<![\w.+-])[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}|(?<![\w-])(?:\+?82[-\s.]?)?0?1[016789][-\s.]?\d{3,4}[-\s.]?\d{4}(?!\w)|(?<![\w-])0\d{1,2}[-\s.]?\d{3,4}[-\s.]?\d{4}(?!\w)|(?<![\w-])1[5-9]\d{2}[-\s.]?\d{4}(?!\w)`;
 const CONTACT_RE = new RegExp(CONTACT_SRC);
 const maskContacts = (s) => (s == null ? s : String(s).replace(new RegExp(CONTACT_SRC, 'g'), '[연락처]'));
+
+// LLM 입력 마스킹 — 고객 유래 텍스트의 식별자를 ASCII 토큰으로 바꾼다. 한글 토큰은 영어 메일의 언어 판정(langOf·mock)을 ko로 뒤집는다.
+// 토큰이 초안에 새면 unresolved_slot(KB에 없는 대괄호)이 잡아 넘김으로 끝난다.
+const RRN_RE = /(?<!\d)\d{6}[-\s]?[1-8]\d{6}(?!\d)/g; // 주민·외국인등록번호(하이픈·공백·구분자 없음)
+const CARD_RE = /(?<![\d-])\d(?:[- ]?\d){12,18}(?![\d-])/g; // 13–19자리
+// maskPii 전용 연락처 — 표기 변형(괄호 지역번호, 여러 대시, 띄어 쓴 구분자, 한글 도메인 메일)까지 본다. 전각 글자는 replaceNfkc가 펼쳐서 맞춘다.
+// guard.check·maskContacts·cases가 쓰는 CONTACT_RE는 그대로 둔다(초안 검사·판단 기록 마스킹의 범위를 바꾸지 않는다).
+const PSEP = String.raw`(?:[ \t]*[-–—.)][ \t]*|\s+)?`;
+const PII_PHONE_SRC = String.raw`(?<![\w-])\(?(?:\+?82${PSEP})?0?1[016789]${PSEP}\d{3,4}${PSEP}\d{4}(?!\w)|(?<![\w-])\(?0\d{1,2}${PSEP}\d{3,4}${PSEP}\d{4}(?!\w)|(?<![\w-])1[5-9]\d{2}${PSEP}\d{4}(?!\w)|(?<![\w+])\+\d{1,3}(?:${PSEP}\(?\d{2,4}){2,4}(?!\d)`;
+// 메일: 영문 부분은 기존 식 그대로, 비영문 글자로 된 이름·도메인 라벨(홍길동@회사.한국)을 더한다. 비영문 이름은 영문 글자를 품지 않는다 — "문의는support@…"의 "문의는"을 먹지 않게. 앞의 (?=비ASCII)는 ASCII 위치에서 느린 \p 뒤보기를 건너뛰는 지름길
+const UCH = String.raw`(?:(?!\w)[\p{L}\p{N}])`;
+const ULABEL = String.raw`(?:[\w-]{1,63}|${UCH}{1,63})`;
+const PII_EMAIL_SRC = String.raw`(?:(?<![\w.+-])[\w.+-]{1,64}|(?=[^\x00-\x7f])(?<![\p{L}\p{N}_.+-])${UCH}{1,64})@${ULABEL}(?:\.${ULABEL}){1,8}`;
+// 영문 메일 → (아직 @가 남았으면) 비영문 메일 → 전화 순서로 나눠 찾는다. 한 식으로 합치거나 u 플래그로 영문 메일까지 보면 긴 입력에서 몇 배 느리다
+const PII_EMAIL_ASCII_RE = /(?<![\w.+-])[\w.+-]{1,64}@[\w-]{1,63}(?:\.[\w-]{1,63}){1,8}/g;
+const PII_EMAIL_RE = new RegExp(PII_EMAIL_SRC, 'gu');
+const PII_PHONE_RE = new RegExp(PII_PHONE_SRC, 'gu');
+const PII_STEPS = [
+  (t) => replaceNfkc(t, RRN_RE, '[RRN]'), (t) => replaceNfkc(t, CARD_RE, '[CARD]'), (t) => replaceNfkc(t, PII_EMAIL_ASCII_RE, '[CONTACT]'),
+  (t) => (/[@＠]/.test(t) ? replaceNfkc(t, PII_EMAIL_RE, '[CONTACT]') : t), (t) => replaceNfkc(t, PII_PHONE_RE, '[CONTACT]'),
+];
+/**
+ * 글자마다 NFKC로 펼친 문자열(전각 숫자·＠ → ASCII)에서 찾고, 원문의 그 구간만 token으로 바꾼다.
+ * 매치 밖 글자는 원문 그대로 둔다 — 전각·호환 문자가 든 다른 문장을 바꾸지 않는다.
+ */
+function replaceNfkc(s, re, token) {
+  if (s.normalize('NFKC') === s) return s.replace(re, token); // 펼칠 글자가 없으면 원문 그대로 찾는다
+  let norm = ''; const start = []; const end = [];
+  for (let i = 0; i < s.length;) {
+    const ch = String.fromCodePoint(s.codePointAt(i)); const n = ch.normalize('NFKC');
+    for (let k = 0; k < n.length; k += 1) { start.push(i); end.push(i + ch.length); }
+    norm += n; i += ch.length;
+  }
+  let out = ''; let last = 0;
+  for (const m of norm.matchAll(re)) {
+    if (!m[0]) continue;
+    const a = start[m.index]; const b = end[m.index + m[0].length - 1];
+    if (a < last) continue;
+    out += s.slice(last, a) + token; last = b;
+  }
+  return out + s.slice(last);
+}
+const LABELED_RE = /(계좌(?:\s*번호)?|입금(?:\s*계좌)?|여권(?:\s*번호)?|passport(?:\s*(?:no\.?|number))?|(?:주문|결제|거래|승인|송장)\s*번호|order\s*(?:no\.?|number|id|#))([\s:：#=]*(?:은|는|이|가)?[\s:：#=]*)((?=[A-Za-z-]*\d)[A-Za-z0-9][A-Za-z0-9-]{3,})/gi;
+const GROUPED_RE = /(?<![\w-])\d{2,6}-\d{2,6}-\d{2,8}(?![\w-])/g; // 라벨 없는 3묶음 번호(계좌·사업자등록번호), 10–16자리만
+// 도로명 주소 — 행정 단위(…시·…군·…구) 뒤의 …로/…길 + 번지만. 앞에 행정 단위가 없거나 번지 뒤가 횟수·단계면 그대로("말씀하신대로 2번").
+const ADDRESS_RE = /(?:[가-힣]+(?:시|군|구)\s+)+[가-힣0-9]+(?:로|길)\s*\d+(?:-\d+)?(?![\d-]|\s*(?:번|단계|회|차|개|명|건|원|%))/g;
+// 이름 경계. 영문 이름은 영문·숫자 경계만 본다(Ann ≠ announcement, 한글 조사·서명이 바로 붙은 Ann드림은 이름).
+// 한글 이름은 앞에 한글이 붙으면 다른 낱말이다. 3음절 이상은 뒤에 무엇이 붙어도 이름(김철수드림·김철수라고·김철수랑),
+// 2음절은 다른 낱말 안에 흔히 들어 있어(이수 ⊂ 이수증) 호칭·조사·서술격이 붙을 때만 이름으로 본다.
+const NAME_SUFFIX = '님|씨|께|에게|한테|은|는|이|가|을|를|의|도|와|과|로|랑|라고|입니다|예요|에요|드림';
+// 표시명이 직함·부서(관리자·고객센터·결제팀·ACME Support …)면 이름이 아니다 — 가리면 본문의 같은 낱말("관리자 권한")까지 [NAME]이 된다.
+const ROLE_NAME_RE = /^(고객|관리자|담당자|매니저|대표|팀장)$|(팀|센터|담당)$|(^|\s)(admin|support|team|manager)$/i;
+function nameRe(n, flags) {
+  const syllables = (n.match(/[가-힣]/g) || []).length;
+  if (!syllables) return new RegExp(`(?<![A-Za-z0-9])${escapeRe(n)}(?![A-Za-z0-9])`, flags);
+  return new RegExp(`(?<![A-Za-z0-9가-힣])${escapeRe(n)}${syllables >= 3 ? '' : `(?=$|[^A-Za-z0-9가-힣]|${NAME_SUFFIX})`}`, flags);
+}
+
+/**
+ * 순서: 링크(KB에 있는 링크는 둔다) → 주민 → 카드 → 연락처 → 라벨 붙은 계좌·여권·주문 번호 → 3묶음 번호 → 도로명 주소 → 이름.
+ * 링크는 guard.check와 같은 비교 키(경로·질의 포함)로 KB와 대조한다 — KB 호스트라도 `?token=…`이 붙은 링크는 가린다.
+ * 이름은 대소문자 무시, 낱말 단위 일치. `고객`·직함·부서(ROLE_NAME_RE)·2자 미만·KB 본문에 낱말로 있거나 회사명과 같은 이름은 가리지 않는다(표시명이 회사명인 전달 메일).
+ */
+function maskPii(text, { name, kbText = '', company } = {}) {
+  if (text == null) return text;
+  const kbLinks = new Set((String(kbText).match(LINK_RE) || []).map(linkKey));
+  let s = String(text).replace(LINK_RE, (u) => { const t = trimUrl(u); return kbLinks.has(linkKey(t)) ? u : `[LINK]${u.slice(t.length)}`; });
+  s = PII_STEPS.reduce((t, step) => step(t), s)
+    .replace(LABELED_RE, (_m, label, sep) => `${label}${sep}[${/^(계좌|입금)/.test(label) ? 'ACCOUNT' : /^(여권|passport)/i.test(label) ? 'PASSPORT' : 'ORDER'}]`)
+    .replace(GROUPED_RE, (m) => (m.replace(/-/g, '').length >= 10 && m.replace(/-/g, '').length <= 16 ? '[ACCOUNT]' : m))
+    .replace(ADDRESS_RE, '[ADDRESS]');
+  const n = String(name || '').trim();
+  if (n.length >= 2 && !ROLE_NAME_RE.test(n) && n.toLowerCase() !== String(company || '').toLowerCase() && !nameRe(n, 'i').test(String(kbText))) {
+    s = s.replace(nameRe(n, 'gi'), '[NAME]');
+  }
+  return s;
+}
 
 // 미치환 자리표시 — {슬롯}·{}·[고객명]·○○ 님·XXX 님·△△님·<이름> 님·<NAME>. KB에 그대로 있는 [메뉴 이름]과 경로([설정 > 계정])는 허용.
 // 사람 직접 답장의 <…>는 "님"이 붙거나 식별자 모양일 때만 — 사람은 <help@acme.example>(주소)·<안내문>(제목 인용)을 쓴다.
@@ -94,4 +171,4 @@ function check({ body, usedFacts = [], pack, kb, intent = null, only = null, hum
   return hits;
 }
 
-module.exports = { check, maskContacts, CONTACT_RE, URL_RE };
+module.exports = { check, maskContacts, maskPii, CONTACT_RE, URL_RE };
