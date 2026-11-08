@@ -1,0 +1,45 @@
+{
+  "sets": {
+    "v1": {
+      "file": "eval/scenarios.v1.jsonl",
+      "sha256": "141c44b0bfb769027abb34193ea018513edf78c3eccb0c9b5559306cc65da30c",
+      "count": 120,
+      "composition": {
+        "bundle": {
+          "A": 76,
+          "B": 8,
+          "C": 4,
+          "D": 6,
+          "E": 4,
+          "F": 4,
+          "G": 4,
+          "H": 4,
+          "I": 4,
+          "J": 6
+        },
+        "split": {
+          "dev": 24,
+          "test": 96
+        },
+        "channel": {
+          "support": 54,
+          "onboarding": 28,
+          "sales": 38
+        }
+      },
+      "frozenAt": "2026-11-05T10:19:19.506Z",
+      "personasFile": "eval/personas.v1.json",
+      "personasSha256": "31066a4f3ed6d0262b2b3e71a19c2ebb6d9d213d9690acbd200d20adf310952f",
+      "policySha256": {
+        "support": "73278de8",
+        "onboarding": "7f61602f",
+        "sales": "1cfdb8a8"
+      },
+      "kbSha256": {
+        "support": "9a7bd181",
+        "onboarding": "34396e78",
+        "sales": "b3919f70"
+      }
+    }
+  }
+}

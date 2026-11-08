@@ -1,0 +1,209 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "CS 응대 에이전트 — 초안(draft) 상태",
+    "quality_profile": "showcase",
+    "viewBox": [
+      1085,
+      640
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "생성 → 승인 → 발송"
+    },
+    {
+      "id": "human",
+      "label": "직접 답장 · 접수 안내"
+    },
+    {
+      "id": "terminal",
+      "label": "발송 없이 종료 · 복사"
+    }
+  ],
+  "states": [
+    {
+      "id": "created",
+      "type": "start",
+      "label": "gate2 판단",
+      "sublabel": "DRAFT · 답장+넘김",
+      "lane": "main",
+      "col": 0,
+      "step": "01",
+      "tag": "⑧"
+    },
+    {
+      "id": "pending",
+      "type": "waiting",
+      "label": "PENDING",
+      "sublabel": "승인 큐 · 수정 가능",
+      "lane": "main",
+      "col": 1,
+      "step": "02",
+      "tag": "L1 · L2"
+    },
+    {
+      "id": "sent",
+      "type": "success",
+      "label": "SENT",
+      "sublabel": "messages(out) 추가",
+      "lane": "main",
+      "col": 3,
+      "step": "04",
+      "tag": "완료"
+    },
+    {
+      "id": "human_reply",
+      "type": "start",
+      "label": "HUMAN_REPLY · ACK",
+      "sublabel": "직접 답장 · 접수 안내",
+      "lane": "human",
+      "col": 1,
+      "tag": "바로 발송",
+      "width": 156
+    },
+    {
+      "id": "stale",
+      "type": "failure",
+      "label": "STALE·DISCARDED",
+      "sublabel": "NOT_SELECTED 포함",
+      "lane": "terminal",
+      "col": 0,
+      "tag": "미발송",
+      "width": 144
+    },
+    {
+      "id": "carry",
+      "type": "waiting",
+      "label": "새 PENDING",
+      "sublabel": "CARRY_OVER 복사",
+      "lane": "terminal",
+      "col": 1,
+      "tag": "승인 큐"
+    },
+    {
+      "id": "shadow",
+      "type": "neutral",
+      "label": "SHADOW",
+      "sublabel": "L0 섀도 · 큐 미노출",
+      "lane": "terminal",
+      "col": 2,
+      "tag": "기록만"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "created-pending",
+      "from": "created",
+      "to": "pending",
+      "note": "DRAFT · ANSWER_AND_HANDOFF → drafts PENDING insert · 케이스 AWAITING_APPROVAL. L2 intent 면 기록 뒤 곧바로 agent:auto 가 승인",
+      "variant": "emphasis"
+    },
+    {
+      "id": "pending-sent",
+      "from": "pending",
+      "to": "sent",
+      "label": "승인 → 발송",
+      "variant": "emphasis"
+    },
+    {
+      "id": "human-sent",
+      "from": "human_reply",
+      "to": "sent",
+      "label": "직접 답장 · 접수 안내",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "human-fail",
+      "from": "human_reply",
+      "to": "stale",
+      "label": "발송 안 됨 → DISCARDED",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "pending-stale",
+      "from": "pending",
+      "to": "stale",
+      "label": "새 메시지 · 폐기 · 인수 · 직접 답장 · 종결",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "left",
+      "via": [
+        [
+          248,
+          479
+        ]
+      ],
+      "labelSegment": 0
+    },
+    {
+      "id": "stale-carry",
+      "from": "stale",
+      "to": "carry",
+      "label": "후속 IGNORE · SHADOW",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          402,
+          535
+        ],
+        [
+          556,
+          535
+        ]
+      ]
+    },
+    {
+      "id": "created-shadow",
+      "from": "created",
+      "to": "shadow",
+      "label": "SHADOW → 기록만",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "bottom",
+      "via": [
+        [
+          16,
+          157
+        ],
+        [
+          16,
+          565
+        ],
+        [
+          710,
+          565
+        ]
+      ],
+      "labelSegment": 2
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "발송 경로",
+      "items": [
+        "승인 · 수정 승인 → 발송 → SENT(나간 답장은 messages 에)",
+        "L2 = 같은 승인 → 발송을 agent:auto 로(활동 auto_send). 자동 발송이 안 되면 승인 대기로 남는다(auto_send_failed) · AUTO_SEND=0 이면 L2 도 사람 승인",
+        "직접 답장(HUMAN_REPLY)·접수 안내(ACK, agent:auto, 케이스당 한 통, sent_by=ack 는 답으로 안 침)도 drafts 행 → 발송 → SENT"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "발송 없이 종료 · CARRY_OVER",
+      "items": [
+        "STALE 새 고객 메시지 · DISCARDED 폐기 · NOT_SELECTED 인수·직접 답장·종결 · 회차 도중 케이스가 바뀐 초안도 STALE·NOT_SELECTED 로 기록만",
+        "STALE 뒤 후속이 IGNORE·SHADOW 로 끝나면 그 초안을 새 PENDING 으로 복사(CARRY_OVER)",
+        "SHADOW 는 L0 기록·평가만 · SUPERSEDED 는 스키마 주석의 예약값(코드가 만들지 않음)"
+      ]
+    }
+  ]
+}

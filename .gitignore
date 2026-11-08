@@ -1,0 +1,12 @@
+data/
+reference/
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+
+# 내부 작업 기록 — 올리지 않는다
+docs/review-log.md
+*.visual-check.*

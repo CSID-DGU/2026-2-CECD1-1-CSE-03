@@ -1,0 +1,486 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CS 응대 에이전트 — 시스템 구성",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "core",
+        "label": "공통 코어",
+        "focus": [
+          "http",
+          "web",
+          "loop",
+          "sweeper",
+          "policykb",
+          "llm",
+          "db",
+          "mail"
+        ],
+        "note": "로컬과 배포가 같은 코드. 바뀌는 건 바깥 어댑터와 환경 변수뿐."
+      },
+      {
+        "id": "local",
+        "label": "LOCAL",
+        "focus": [
+          "sim",
+          "operator",
+          "http",
+          "llm",
+          "mail",
+          "db"
+        ],
+        "note": "npm run sim 합성 문의 · mock LLM · mock 메일 · SQLite 파일 · 인증 없음 · 테스트 주입(production 밖 mock 메일, 또는 ENABLE_TEST_INJECT=1)."
+      },
+      {
+        "id": "deployed",
+        "label": "DEPLOYED",
+        "focus": [
+          "webhook",
+          "proxy",
+          "http",
+          "claude",
+          "smtp",
+          "volume",
+          "notify"
+        ],
+        "note": "웹훅 + INBOUND_SECRET · 프록시 AUTH_USER_HEADER + PROXY_SHARED_SECRET · anthropic · SMTP · 알림 웹훅 · 볼륨 · /api/health · 토큰 예산 · 보존 기간."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "sim",
+      "type": "external",
+      "label": "npm run sim",
+      "sublabel": "합성 문의 주입",
+      "tag": "LOCAL",
+      "pos": [
+        40,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "operator",
+      "type": "external",
+      "label": "로컬 브라우저",
+      "sublabel": "인증 없음 · 테스트 주입",
+      "pos": [
+        40,
+        220
+      ],
+      "size": [
+        150,
+        60
+      ],
+      "tag": "LOCAL"
+    },
+    {
+      "id": "proxy",
+      "type": "security",
+      "label": "리버스 프록시",
+      "sublabel": "AUTH_USER_HEADER 주입",
+      "tag": "DEPLOYED",
+      "pos": [
+        40,
+        380
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "webhook",
+      "type": "cloud",
+      "label": "메일 웹훅",
+      "sublabel": "x-inbound-secret",
+      "tag": "DEPLOYED",
+      "pos": [
+        40,
+        540
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "대시보드 web/",
+      "sublabel": "바닐라 SPA · 빌드 없음",
+      "pos": [
+        300,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "http",
+      "type": "backend",
+      "label": "HTTP 서버 node:http",
+      "sublabel": "REST · CRM · SSE",
+      "pos": [
+        300,
+        220
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "sweeper",
+      "type": "backend",
+      "label": "Sweeper 타이머",
+      "sublabel": "15초 · 재시도 · 종결 · 파기",
+      "pos": [
+        300,
+        380
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "policykb",
+      "type": "security",
+      "label": "정책 팩 + KB",
+      "sublabel": "policy/ · kb/ 마크다운",
+      "pos": [
+        580,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "loop",
+      "type": "backend",
+      "label": "Loop runner",
+      "sublabel": "runCycle · approve · L2",
+      "tag": "리스 · 큐",
+      "pos": [
+        580,
+        220
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "SQLite node:sqlite",
+      "sublabel": "처리 테이블 · CRM 문서",
+      "pos": [
+        580,
+        380
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "volume",
+      "type": "database",
+      "label": "영속 볼륨",
+      "sublabel": "/app/data 마운트",
+      "tag": "DEPLOYED",
+      "pos": [
+        1120,
+        540
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "cloud",
+      "label": "LLM 어댑터",
+      "sublabel": "mock | anthropic",
+      "pos": [
+        860,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "mail",
+      "type": "external",
+      "label": "메일 어댑터",
+      "sublabel": "mock | smtp",
+      "pos": [
+        860,
+        380
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "anthropic API",
+      "sublabel": "ANTHROPIC_API_KEY",
+      "tag": "DEPLOYED",
+      "pos": [
+        1120,
+        60
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "notify",
+      "type": "external",
+      "label": "알림 웹훅",
+      "sublabel": "NOTIFY_WEBHOOK_URL",
+      "tag": "DEPLOYED",
+      "pos": [
+        1120,
+        220
+      ],
+      "size": [
+        150,
+        60
+      ]
+    },
+    {
+      "id": "smtp",
+      "type": "external",
+      "label": "SMTP 서버",
+      "sublabel": "STARTTLS · AUTH",
+      "tag": "DEPLOYED",
+      "pos": [
+        1120,
+        380
+      ],
+      "size": [
+        150,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "server/ — 단일 Node 22 프로세스 (로컬·배포 같은 코드)",
+      "wraps": [
+        "web",
+        "http",
+        "sweeper",
+        "policykb",
+        "loop",
+        "db",
+        "llm",
+        "mail"
+      ],
+      "pad": 20
+    },
+    {
+      "kind": "region",
+      "label": "LOCAL",
+      "wraps": [
+        "sim",
+        "operator"
+      ],
+      "pad": 16
+    },
+    {
+      "kind": "security-group",
+      "label": "DEPLOYED · 입구",
+      "wraps": [
+        "proxy",
+        "webhook"
+      ],
+      "pad": 16
+    },
+    {
+      "kind": "region",
+      "label": "DEPLOYED · 바깥",
+      "wraps": [
+        "claude",
+        "notify",
+        "smtp",
+        "volume"
+      ],
+      "pad": 16
+    }
+  ],
+  "connections": [
+    {
+      "from": "sim",
+      "to": "http",
+      "label": "POST /api/inbound",
+      "variant": "dashed",
+      "toSide": "top"
+    },
+    {
+      "from": "web",
+      "to": "http",
+      "label": "REST + SSE",
+      "variant": "emphasis",
+      "labelDy": 30
+    },
+    {
+      "from": "operator",
+      "to": "http",
+      "label": "localhost:3000",
+      "variant": "default"
+    },
+    {
+      "from": "proxy",
+      "to": "http",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "from": "webhook",
+      "to": "http",
+      "label": "POST /api/inbound",
+      "variant": "security",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelAt": [
+        245,
+        500
+      ]
+    },
+    {
+      "from": "http",
+      "to": "loop",
+      "label": "runCycle · approve",
+      "variant": "emphasis"
+    },
+    {
+      "from": "sweeper",
+      "to": "loop",
+      "label": "재시도",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelSegment": 1
+    },
+    {
+      "from": "sweeper",
+      "to": "db",
+      "label": "자동 종결 · 파기",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left",
+      "labelDy": 22
+    },
+    {
+      "from": "loop",
+      "to": "policykb",
+      "label": "decide · KB 절",
+      "variant": "default",
+      "labelDx": -48
+    },
+    {
+      "from": "loop",
+      "to": "llm",
+      "label": "llm.json()",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "from": "loop",
+      "to": "notify",
+      "label": "넘김·승인 대기·종결 뒤 회신",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "from": "loop",
+      "to": "db",
+      "label": "판단 · 초안 기록",
+      "variant": "default",
+      "labelDy": 30,
+      "labelDx": -48
+    },
+    {
+      "from": "loop",
+      "to": "mail",
+      "label": "승인 → 발송 · L2 · 접수 안내",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "from": "llm",
+      "to": "claude",
+      "label": "HTTPS",
+      "variant": "dashed"
+    },
+    {
+      "from": "mail",
+      "to": "smtp",
+      "label": "허용 도메인만",
+      "variant": "dashed"
+    },
+    {
+      "from": "db",
+      "to": "volume",
+      "label": "DB_PATH",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "공통 코어",
+      "items": [
+        "로컬·배포 같은 코드 · 의존성 0(node:http · node:sqlite · fetch · SSE)",
+        "회차 상태 일부가 프로세스 메모리에 있어 인스턴스 1개. 늘리려면 Postgres + 공유 잠금",
+        "수신 스레딩: 스레드 id 우선, 모르는 스레드면 In-Reply-To·References 가 가리키는 기존 메일의 케이스 · 제목 매칭 없음"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "LOCAL",
+      "items": [
+        "npm run sim → /api/inbound · mock LLM·메일 · SQLite 파일 · 인증 없음",
+        "npm run demo 는 서버 없이 메모리 DB 에서 같은 루프를 돈다",
+        "테스트 주입 /api/test/inbound — production 밖 mock 메일, 또는 ENABLE_TEST_INJECT=1"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "DEPLOYED",
+      "items": [
+        "production 의 mock 메일은 ALLOW_MOCK_MAIL=1 없으면 시작 거부 · 볼륨 /app/data",
+        "알림은 넘김·승인 대기·사람 담당 종결 케이스의 고객 회신만(PII 없음)",
+        "킬스위치 SHADOW_CHANNELS · AUTO_SEND=0 · LLM_DAILY_TOKEN_BUDGET · RETENTION_DAYS"
+      ]
+    }
+  ]
+}

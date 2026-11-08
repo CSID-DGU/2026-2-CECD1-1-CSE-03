@@ -1,0 +1,531 @@
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-5-5",
+  "startedAt": "2026-11-01T12:26:35.458Z",
+  "finishedAt": "2026-11-01T12:28:59.429Z",
+  "matched": 17,
+  "total": 20,
+  "usage": {
+    "calls": 46,
+    "input_tokens": 124269,
+    "output_tokens": 14388,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "cases": [
+    {
+      "id": 1,
+      "channel": "support",
+      "expected": {
+        "action": "DRAFT",
+        "intent": "account_deletion"
+      },
+      "ok": true,
+      "latencyMs": 12323,
+      "actual": {
+        "action": "DRAFT",
+        "reason": null,
+        "intent": "account_deletion",
+        "language": "ko",
+        "confidence": 0.97,
+        "kbHit": true
+      },
+      "usage": {
+        "calls": 4,
+        "input_tokens": 12022,
+        "output_tokens": 754,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 2,
+      "channel": "support",
+      "expected": {
+        "action": "DRAFT",
+        "intent": "receipt"
+      },
+      "ok": true,
+      "latencyMs": 5826,
+      "actual": {
+        "action": "DRAFT",
+        "reason": null,
+        "intent": "receipt",
+        "language": "ko",
+        "confidence": 0.95,
+        "kbHit": true
+      },
+      "usage": {
+        "calls": 3,
+        "input_tokens": 8575,
+        "output_tokens": 427,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 3,
+      "channel": "support",
+      "expected": {
+        "action": "DRAFT",
+        "intent": "cancel_subscription"
+      },
+      "ok": true,
+      "latencyMs": 5664,
+      "actual": {
+        "action": "DRAFT",
+        "reason": null,
+        "intent": "cancel_subscription",
+        "language": "ko",
+        "confidence": 0.96,
+        "kbHit": true
+      },
+      "usage": {
+        "calls": 3,
+        "input_tokens": 8615,
+        "output_tokens": 487,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 4,
+      "channel": "support",
+      "expected": {
+        "action": "HANDOFF",
+        "intent": "refund",
+        "reasons": "refund_request"
+      },
+      "ok": true,
+      "latencyMs": 8426,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "refund_request",
+        "intent": "refund",
+        "language": "ko",
+        "confidence": 0.95,
+        "kbHit": false
+      },
+      "usage": {
+        "calls": 2,
+        "input_tokens": 5985,
+        "output_tokens": 891,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 5,
+      "channel": "support",
+      "expected": {
+        "action": "HANDOFF",
+        "intent": "billing_dispute",
+        "reasons": "billing_dispute"
+      },
+      "ok": true,
+      "latencyMs": 7298,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "billing_dispute",
+        "intent": "billing_dispute",
+        "language": "ko",
+        "confidence": 0.93,
+        "kbHit": false
+      },
+      "usage": {
+        "calls": 2,
+        "input_tokens": 6068,
+        "output_tokens": 876,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 6,
+      "channel": "support",
+      "expected": {
+        "action": "HANDOFF",
+        "intent": "data_export",
+        "reasons": "data_export"
+      },
+      "ok": true,
+      "latencyMs": 8172,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "data_export",
+        "intent": "data_export",
+        "language": "ko",
+        "confidence": 0.95,
+        "kbHit": false
+      },
+      "usage": {
+        "calls": 2,
+        "input_tokens": 5993,
+        "output_tokens": 996,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 7,
+      "channel": "support",
+      "expected": {
+        "action": "HANDOFF",
+        "reasons": [
+          "legal_threat",
+          "complaint"
+        ]
+      },
+      "ok": true,
+      "latencyMs": 7602,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "legal_threat",
+        "intent": null,
+        "language": null,
+        "confidence": null,
+        "kbHit": null
+      },
+      "usage": {
+        "calls": 1,
+        "input_tokens": 2106,
+        "output_tokens": 908,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 8,
+      "channel": "support",
+      "expected": {
+        "action": "DRAFT",
+        "intent": "login_issue"
+      },
+      "ok": true,
+      "latencyMs": 5495,
+      "actual": {
+        "action": "DRAFT",
+        "reason": null,
+        "intent": "login_issue",
+        "language": "ko",
+        "confidence": 0.93,
+        "kbHit": true
+      },
+      "usage": {
+        "calls": 3,
+        "input_tokens": 8598,
+        "output_tokens": 428,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 9,
+      "channel": "support",
+      "expected": {
+        "action": "HANDOFF",
+        "reasons": "injection"
+      },
+      "ok": true,
+      "latencyMs": 8020,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "injection",
+        "intent": null,
+        "language": null,
+        "confidence": null,
+        "kbHit": null
+      },
+      "usage": {
+        "calls": 1,
+        "input_tokens": 2097,
+        "output_tokens": 825,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 10,
+      "channel": "support",
+      "expected": {
+        "action": "IGNORE"
+      },
+      "ok": true,
+      "latencyMs": 3,
+      "actual": {
+        "action": "IGNORE",
+        "reason": "auto_reply_or_empty",
+        "intent": null,
+        "language": null,
+        "confidence": null,
+        "kbHit": null
+      },
+      "usage": {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 11,
+      "channel": "support",
+      "expected": {
+        "action": "IGNORE",
+        "intent": "ack"
+      },
+      "ok": true,
+      "latencyMs": 1567,
+      "actual": {
+        "action": "IGNORE",
+        "reason": "ack",
+        "intent": "ack",
+        "language": "ko",
+        "confidence": 0.95,
+        "kbHit": false
+      },
+      "usage": {
+        "calls": 1,
+        "input_tokens": 3801,
+        "output_tokens": 136,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 12,
+      "channel": "onboarding",
+      "expected": {
+        "action": "DRAFT",
+        "intent": "onboarding_request"
+      },
+      "ok": true,
+      "latencyMs": 9530,
+      "actual": {
+        "action": "DRAFT",
+        "reason": null,
+        "intent": "onboarding_request",
+        "language": "ko",
+        "confidence": 0.93,
+        "kbHit": true
+      },
+      "usage": {
+        "calls": 5,
+        "input_tokens": 12720,
+        "output_tokens": 1031,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 13,
+      "channel": "onboarding",
+      "expected": {
+        "action": "DRAFT",
+        "intent": "meeting_request"
+      },
+      "ok": false,
+      "latencyMs": 12037,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "guard_failed",
+        "intent": "meeting_request",
+        "language": "ko",
+        "confidence": 0.9,
+        "kbHit": "partial"
+      },
+      "usage": {
+        "calls": 5,
+        "input_tokens": 11572,
+        "output_tokens": 1538,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 14,
+      "channel": "onboarding",
+      "expected": {
+        "action": "HANDOFF",
+        "intent": "pricing_question",
+        "reasons": "policy_exception"
+      },
+      "ok": false,
+      "latencyMs": 8712,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "pricing",
+        "intent": "pricing_question",
+        "language": "ko",
+        "confidence": 0.93,
+        "kbHit": false
+      },
+      "usage": {
+        "calls": 2,
+        "input_tokens": 4658,
+        "output_tokens": 903,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 15,
+      "channel": "sales",
+      "expected": {
+        "action": "DRAFT",
+        "intent": "material_request"
+      },
+      "ok": true,
+      "latencyMs": 6977,
+      "actual": {
+        "action": "DRAFT",
+        "reason": null,
+        "intent": "material_request",
+        "language": "ko",
+        "confidence": 0.95,
+        "kbHit": true
+      },
+      "usage": {
+        "calls": 3,
+        "input_tokens": 8041,
+        "output_tokens": 356,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 16,
+      "channel": "sales",
+      "expected": {
+        "action": "ANSWER_AND_HANDOFF",
+        "intent": "quote_request"
+      },
+      "ok": false,
+      "latencyMs": 7867,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "low_confidence",
+        "intent": "quote_request",
+        "language": "ko",
+        "confidence": 0.7,
+        "kbHit": "partial"
+      },
+      "usage": {
+        "calls": 2,
+        "input_tokens": 5647,
+        "output_tokens": 1074,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 17,
+      "channel": "sales",
+      "expected": {
+        "action": "HANDOFF",
+        "reasons": [
+          "human_request",
+          "call_meeting"
+        ]
+      },
+      "ok": true,
+      "latencyMs": 7271,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "human_request",
+        "intent": null,
+        "language": null,
+        "confidence": null,
+        "kbHit": null
+      },
+      "usage": {
+        "calls": 1,
+        "input_tokens": 1907,
+        "output_tokens": 694,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 18,
+      "channel": "sales",
+      "expected": {
+        "action": "HANDOFF",
+        "reasons": [
+          "purchase_intent",
+          "contract_documents"
+        ]
+      },
+      "ok": true,
+      "latencyMs": 6185,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "contract_documents",
+        "intent": null,
+        "language": null,
+        "confidence": null,
+        "kbHit": null
+      },
+      "usage": {
+        "calls": 1,
+        "input_tokens": 1900,
+        "output_tokens": 731,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 19,
+      "channel": "support",
+      "expected": {
+        "action": "DRAFT",
+        "intent": "cancel_subscription",
+        "language": "en"
+      },
+      "ok": true,
+      "latencyMs": 4451,
+      "actual": {
+        "action": "DRAFT",
+        "reason": null,
+        "intent": "cancel_subscription",
+        "language": "en",
+        "confidence": 0.96,
+        "kbHit": true
+      },
+      "usage": {
+        "calls": 3,
+        "input_tokens": 7980,
+        "output_tokens": 360,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    },
+    {
+      "id": 20,
+      "channel": "support",
+      "expected": {
+        "action": "HANDOFF",
+        "intent": "refund",
+        "reasons": "refund_request"
+      },
+      "ok": true,
+      "latencyMs": 10541,
+      "actual": {
+        "action": "HANDOFF",
+        "reason": "refund_request",
+        "intent": "refund",
+        "language": "ko",
+        "confidence": 0.93,
+        "kbHit": false
+      },
+      "usage": {
+        "calls": 2,
+        "input_tokens": 5984,
+        "output_tokens": 973,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0
+      }
+    }
+  ]
+}

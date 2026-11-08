@@ -1,0 +1,485 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "CS 응대 에이전트 — 데이터 모델 (SQLite)",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "case-hub",
+        "label": "케이스 중심",
+        "focus": [
+          "cases",
+          "case_threads",
+          "messages",
+          "loops",
+          "activities"
+        ],
+        "note": "케이스 1 = 문의 1. 스레드 id 가 case_threads 로 케이스에 묶이고, 메시지는 케이스 아래 도착 순(rowid)."
+      },
+      {
+        "id": "agent-output",
+        "label": "에이전트 산출물",
+        "focus": [
+          "cases",
+          "drafts",
+          "messages",
+          "decisions",
+          "handoffs",
+          "dispatches",
+          "versions",
+          "llm_calls"
+        ],
+        "note": "초안·판단·넘김·발송 기록. 초안은 답하는 고객 메시지(trigger_message_id)를 남긴다. 판단 행마다 prompt·kb·policy 버전."
+      },
+      {
+        "id": "intake-dedupe",
+        "label": "수신 중복 차단",
+        "focus": [
+          "case_threads",
+          "messages",
+          "doc_events"
+        ],
+        "note": "case_threads.thread_id PK · messages.provider_message_id UQ · inbound_events.dedupeKey UQ — 같은 메일·스레드는 한 번만"
+      },
+      {
+        "id": "crm-collections",
+        "label": "CRM 컬렉션",
+        "focus": [
+          "doc_events",
+          "doc_cases",
+          "doc_activities",
+          "doc_contacts",
+          "doc_companies",
+          "messages",
+          "cases"
+        ],
+        "note": "inbound_events 는 수신 트랜잭션 안에서 동기로, 나머지 문서는 트랜잭션이 끝난 뒤 지연 flush 가 처리 테이블에서 다시 계산한다."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "doc_contacts",
+      "type": "database",
+      "label": "contacts",
+      "sublabel": "primaryEmail UQ",
+      "tag": "컬렉션",
+      "pos": [
+        20,
+        130
+      ],
+      "size": [
+        170,
+        56
+      ]
+    },
+    {
+      "id": "doc_companies",
+      "type": "database",
+      "label": "companies",
+      "sublabel": "primaryDomain UQ",
+      "tag": "컬렉션",
+      "pos": [
+        210,
+        130
+      ],
+      "size": [
+        170,
+        56
+      ]
+    },
+    {
+      "id": "doc_cases",
+      "type": "database",
+      "label": "cases 문서",
+      "sublabel": "status · subStatus · statusHistory",
+      "tag": "컬렉션",
+      "pos": [
+        460,
+        130
+      ],
+      "size": [
+        170,
+        56
+      ]
+    },
+    {
+      "id": "doc_activities",
+      "type": "database",
+      "label": "activities 문서",
+      "sublabel": "type · direction · summary",
+      "tag": "컬렉션",
+      "pos": [
+        690,
+        130
+      ],
+      "size": [
+        170,
+        56
+      ]
+    },
+    {
+      "id": "doc_events",
+      "type": "database",
+      "label": "inbound_events",
+      "sublabel": "dedupeKey UQ · rawPayload",
+      "tag": "컬렉션",
+      "pos": [
+        960,
+        130
+      ],
+      "size": [
+        170,
+        56
+      ]
+    },
+    {
+      "id": "case_threads",
+      "type": "database",
+      "label": "case_threads",
+      "sublabel": "thread_id PK · case_id FK",
+      "pos": [
+        40,
+        290
+      ],
+      "size": [
+        220,
+        66
+      ],
+      "tag": "중복 차단"
+    },
+    {
+      "id": "messages",
+      "type": "database",
+      "label": "messages",
+      "sublabel": "provider_message_id UQ · event_id",
+      "pos": [
+        640,
+        290
+      ],
+      "size": [
+        220,
+        66
+      ],
+      "tag": "중복 차단"
+    },
+    {
+      "id": "loops",
+      "type": "database",
+      "label": "loops",
+      "sublabel": "lease_token · queue · retry_count",
+      "pos": [
+        40,
+        410
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "cases",
+      "type": "database",
+      "label": "cases",
+      "sublabel": "state · responder · close_reason",
+      "tag": "Aggregate",
+      "pos": [
+        330,
+        410
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "drafts",
+      "type": "database",
+      "label": "drafts",
+      "sublabel": "status · action · trigger_message_id",
+      "pos": [
+        640,
+        410
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "dispatches",
+      "type": "database",
+      "label": "dispatches",
+      "sublabel": "발송 기록",
+      "pos": [
+        940,
+        410
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "activities",
+      "type": "database",
+      "label": "activities",
+      "sublabel": "type · actor · payload",
+      "pos": [
+        40,
+        530
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "handoffs",
+      "type": "database",
+      "label": "handoffs",
+      "sublabel": "reason · briefing · returned_at",
+      "pos": [
+        330,
+        530
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "decisions",
+      "type": "database",
+      "label": "decisions",
+      "sublabel": "step · action · *_version",
+      "pos": [
+        640,
+        530
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "versions",
+      "type": "database",
+      "label": "versions",
+      "sublabel": "hash PK · prompt: · kb: · policy:",
+      "tag": "재현",
+      "pos": [
+        940,
+        530
+      ],
+      "size": [
+        220,
+        66
+      ]
+    },
+    {
+      "id": "llm_calls",
+      "type": "database",
+      "label": "llm_calls",
+      "sublabel": "agent · tokens · ok · FK 없음",
+      "tag": "계량",
+      "pos": [
+        940,
+        290
+      ],
+      "size": [
+        220,
+        66
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "from": "cases",
+      "to": "case_threads",
+      "label": "1 — n",
+      "variant": "default",
+      "fromSide": "top",
+      "toSide": "right"
+    },
+    {
+      "from": "cases",
+      "to": "loops",
+      "label": "1 — 1",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "from": "cases",
+      "to": "messages",
+      "label": "1 — n",
+      "variant": "emphasis"
+    },
+    {
+      "from": "cases",
+      "to": "drafts",
+      "label": "1 — n",
+      "variant": "emphasis",
+      "labelDx": 21
+    },
+    {
+      "from": "drafts",
+      "to": "messages",
+      "label": "trigger_message_id",
+      "variant": "dashed"
+    },
+    {
+      "from": "dispatches",
+      "to": "drafts",
+      "label": "draft_id",
+      "variant": "default"
+    },
+    {
+      "from": "cases",
+      "to": "decisions",
+      "label": "1 — n",
+      "variant": "default",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "from": "cases",
+      "to": "handoffs",
+      "label": "1 — n",
+      "variant": "default",
+      "labelAt": [
+        440,
+        503
+      ]
+    },
+    {
+      "from": "cases",
+      "to": "activities",
+      "label": "1 — n",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "from": "decisions",
+      "to": "versions",
+      "label": "*_version → hash",
+      "variant": "dashed",
+      "labelDy": -40
+    },
+    {
+      "id": "ev-case",
+      "from": "doc_events",
+      "to": "doc_cases",
+      "label": "resolvedCaseId",
+      "variant": "default",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    },
+    {
+      "id": "ev-contact",
+      "from": "doc_events",
+      "to": "doc_contacts",
+      "label": "resolvedContactId",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "ev-company",
+      "from": "doc_events",
+      "to": "doc_companies",
+      "label": "resolvedCompanyId",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "id": "case-contact",
+      "from": "doc_cases",
+      "to": "doc_contacts",
+      "label": "contactId",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "bottom",
+      "labelAt": [
+        436,
+        200
+      ]
+    },
+    {
+      "id": "case-company",
+      "from": "doc_cases",
+      "to": "doc_companies",
+      "label": "companyId",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "act-case",
+      "from": "doc_activities",
+      "to": "doc_cases",
+      "label": "caseId",
+      "variant": "default",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "act-event",
+      "from": "doc_activities",
+      "to": "doc_events",
+      "label": "inboundEventId",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "sync-intake",
+      "from": "messages",
+      "to": "doc_events",
+      "label": "수신 트랜잭션 안 · 동기",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "flush",
+      "from": "cases",
+      "to": "doc_cases",
+      "label": "지연 flush · 트랜잭션 뒤",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "집합 단위 · 이식",
+      "items": [
+        "cases 가 Aggregate — 케이스 1 = 문의 1",
+        "llm_calls 는 FK 없이 호출 1건 = 1행(본문 없음)",
+        "Postgres 이식: rowid → seq bigserial · node:sqlite → async"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "CRM 컬렉션 — documents",
+      "items": [
+        "처리 테이블이 진실, 문서는 다시 계산한 투영 · 바뀔 때만 revision +1",
+        "inbound_events 만 수신 트랜잭션 안 · 나머지는 지연 flush"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "수신 중복 차단 · 재현",
+      "items": [
+        "messages.provider_message_id · inbound_events.dedupeKey · case_threads.thread_id",
+        "versions.hash — decisions *_version 으로 그때 본 prompt·kb·policy 재현"
+      ]
+    }
+  ]
+}

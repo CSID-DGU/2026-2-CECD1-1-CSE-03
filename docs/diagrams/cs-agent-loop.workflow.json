@@ -1,0 +1,480 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "CS 응대 에이전트 — 한 회차 루프",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-cycle",
+        "label": "한 회차 메인 경로",
+        "focus": [
+          "context",
+          "prefilter",
+          "triage",
+          "gate1",
+          "respond",
+          "guard",
+          "review",
+          "gate2",
+          "execute",
+          "queue",
+          "send"
+        ],
+        "note": "코드가 접수·답장·검수 Agent 를 차례로 불러 각 Result 를 받고 모든 단계를 decisions 에 남긴다. ② 맥락 = 최근 6통(나간 답장 포함) · gate 판단 3개 · 사람 발신(고쳐 승인한 답장 포함)."
+      },
+      {
+        "id": "handoff-branches",
+        "label": "넘김 분기",
+        "focus": [
+          "prefilter",
+          "gate1",
+          "guard",
+          "gate2",
+          "execute",
+          "handoff"
+        ],
+        "note": "③ 자동 회신·사내 발신 IGNORE, 인증 실패·보낸 사람 바뀜·위험 문장 HANDOFF(팩 사유만). 규칙 2 = H 등급·미지원 언어·위험 신호·답 못 할 사유. 넘김은 인계 Agent."
+      },
+      {
+        "id": "llm-failure",
+        "label": "LLM 장애",
+        "focus": [
+          "respond",
+          "retry",
+          "context",
+          "handoff"
+        ],
+        "note": "LLM 실패 → error 행(RETRY)·next_retry_at, 케이스는 OPEN. sweeper(15초)가 예정 시각에 다시 돌린다. 5번째 실패나 일일 토큰 예산 소진이면 llm_error 로 코드 브리핑 넘김."
+      },
+      {
+        "id": "hitl",
+        "label": "사람 승인·전담",
+        "focus": [
+          "queue",
+          "send",
+          "human",
+          "context"
+        ],
+        "note": "반환은 사람 전담 케이스만(아니면 409 not_handed_off, 회차 중이면 409 busy), 마지막 미답 메시지로 즉시 회차. 사람 전담 중 새 메시지는 IGNORE(responder_human) 기록만."
+      },
+      {
+        "id": "ack",
+        "label": "접수 안내",
+        "focus": [
+          "execute",
+          "handoff"
+        ],
+        "note": "HANDOFF 엔 팩 ackReply 고정 문구 한 통(사실·날짜 없음, 케이스당 1번, 답으로 안 침, 신뢰 발신자만). 지시 변경 시도·법적 언급·보낸 사람 바뀜이면 생략. AUTO_SEND=0 이면 자동 발송과 함께 꺼짐."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "code_lane",
+      "label": "코드 · loop.js"
+    },
+    {
+      "id": "agents_lane",
+      "label": "LLM 에이전트"
+    },
+    {
+      "id": "retry_lane",
+      "label": "LLM 장애",
+      "variant": "exception"
+    },
+    {
+      "id": "hitl_lane",
+      "label": "사람 · HITL"
+    }
+  ],
+  "phases": [
+    {
+      "id": "intake",
+      "label": "수신·거르기",
+      "fromCol": 0,
+      "toCol": 1
+    },
+    {
+      "id": "reason",
+      "label": "분류·작성·검사",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "act",
+      "label": "판단·실행·승인",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "context",
+    "prefilter",
+    "triage",
+    "gate1",
+    "respond",
+    "guard",
+    "review",
+    "gate2",
+    "execute"
+  ],
+  "nodes": [
+    {
+      "id": "context",
+      "lane": "code_lane",
+      "col": 0,
+      "type": "backend",
+      "label": "①② 수신·맥락",
+      "sublabel": "리스 · 큐 · 최근 6통",
+      "tag": "runCycle",
+      "width": 140
+    },
+    {
+      "id": "prefilter",
+      "lane": "code_lane",
+      "col": 1,
+      "type": "security",
+      "label": "③ 1차 거르기",
+      "sublabel": "코드 규칙 · PASS 도 기록",
+      "width": 140
+    },
+    {
+      "id": "gate1",
+      "lane": "code_lane",
+      "col": 2,
+      "type": "security",
+      "label": "⑤ gate1 판단",
+      "sublabel": "규칙 1–7 · 8 COMPOSE",
+      "width": 140
+    },
+    {
+      "id": "guard",
+      "lane": "code_lane",
+      "col": 3,
+      "type": "security",
+      "label": "⑦ guard 검사",
+      "sublabel": "intent 별 KB 근거",
+      "width": 140
+    },
+    {
+      "id": "gate2",
+      "lane": "code_lane",
+      "col": 4,
+      "type": "security",
+      "label": "⑧ gate2 판단",
+      "sublabel": "규칙 9–12",
+      "width": 140
+    },
+    {
+      "id": "execute",
+      "lane": "code_lane",
+      "col": 5,
+      "type": "database",
+      "label": "⑨⑩ 실행·기록",
+      "sublabel": "action · L2 · 접수 안내",
+      "width": 140
+    },
+    {
+      "id": "triage",
+      "lane": "agents_lane",
+      "col": 1,
+      "type": "backend",
+      "label": "④ 접수 Agent",
+      "sublabel": "intent · kbHit · risk",
+      "tag": "Triage · 냉정한 접수 담당자",
+      "width": 140
+    },
+    {
+      "id": "respond",
+      "lane": "agents_lane",
+      "col": 2,
+      "type": "backend",
+      "label": "⑥ 답장 Agent",
+      "sublabel": "KB 사실만 · usedFacts",
+      "tag": "Responder · 채널 페르소나",
+      "width": 140
+    },
+    {
+      "id": "review",
+      "lane": "agents_lane",
+      "col": 4,
+      "type": "backend",
+      "label": "⑦ 검수 Agent",
+      "sublabel": "guard 통과 시만 · 7항목",
+      "tag": "Reviewer · 의심 많은 선임",
+      "width": 140
+    },
+    {
+      "id": "handoff",
+      "lane": "agents_lane",
+      "col": 5,
+      "type": "backend",
+      "label": "인계 Agent",
+      "sublabel": "handoffs → HANDED_OFF",
+      "tag": "Briefer · 인수인계 동료",
+      "width": 140
+    },
+    {
+      "id": "retry",
+      "lane": "retry_lane",
+      "col": 2,
+      "type": "messagebus",
+      "label": "재시도 예약",
+      "sublabel": "2·5·10·30분 → sweeper",
+      "tag": "scheduleRetry",
+      "width": 140
+    },
+    {
+      "id": "human",
+      "lane": "hitl_lane",
+      "col": 1,
+      "type": "frontend",
+      "label": "사람 전담",
+      "sublabel": "인수 · 직접 답장 · 반환",
+      "width": 140
+    },
+    {
+      "id": "queue",
+      "lane": "hitl_lane",
+      "col": 2,
+      "type": "messagebus",
+      "label": "⑨ 승인 큐",
+      "sublabel": "drafts PENDING",
+      "width": 140
+    },
+    {
+      "id": "send",
+      "lane": "hitl_lane",
+      "col": 3,
+      "type": "frontend",
+      "label": "승인 → 발송",
+      "sublabel": "사람 · agent:auto(L2)",
+      "width": 140
+    }
+  ],
+  "edges": [
+    {
+      "id": "context-prefilter",
+      "from": "context",
+      "to": "prefilter",
+      "role": "main",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "prefilter-triage",
+      "from": "prefilter",
+      "to": "triage",
+      "label": "PASS",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 54
+    },
+    {
+      "id": "prefilter-execute",
+      "from": "prefilter",
+      "to": "execute",
+      "label": "IGNORE · HANDOFF",
+      "route": "up-channel",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "id": "triage-gate1",
+      "from": "triage",
+      "to": "gate1",
+      "role": "main",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "gate1-respond",
+      "from": "gate1",
+      "to": "respond",
+      "label": "COMPOSE",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 54
+    },
+    {
+      "id": "gate1-execute",
+      "from": "gate1",
+      "to": "execute",
+      "label": "규칙 1–7",
+      "route": "up-channel",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "id": "respond-guard",
+      "from": "respond",
+      "to": "guard",
+      "role": "main",
+      "fromSide": "right",
+      "toSide": "bottom"
+    },
+    {
+      "id": "guard-review",
+      "from": "guard",
+      "to": "review",
+      "label": "통과",
+      "role": "main",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "guard-rewrite",
+      "from": "guard",
+      "to": "respond",
+      "label": "위반 → 재작성",
+      "variant": "dashed",
+      "role": "return",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "review-rewrite",
+      "from": "review",
+      "to": "respond",
+      "label": "fail → 재작성",
+      "variant": "dashed",
+      "role": "return",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "review-gate2",
+      "from": "review",
+      "to": "gate2",
+      "role": "main"
+    },
+    {
+      "id": "gate2-execute",
+      "from": "gate2",
+      "to": "execute",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "label": "action · rule"
+    },
+    {
+      "id": "execute-handoff",
+      "from": "execute",
+      "to": "handoff",
+      "label": "HANDOFF + 접수 안내",
+      "variant": "security",
+      "role": "branch",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 54
+    },
+    {
+      "id": "execute-queue",
+      "from": "execute",
+      "to": "queue",
+      "label": "DRAFT · ANSWER_AND_HANDOFF",
+      "role": "branch",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "queue-send",
+      "from": "queue",
+      "to": "send",
+      "label": "승인 · 수정 승인",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "queue-human",
+      "from": "queue",
+      "to": "human",
+      "label": "폐기 → 사람 전담",
+      "variant": "security",
+      "role": "branch",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "human-context",
+      "from": "human",
+      "to": "context",
+      "label": "반환 → 즉시 회차",
+      "variant": "emphasis",
+      "role": "return",
+      "fromSide": "left",
+      "toSide": "left"
+    },
+    {
+      "id": "respond-retry",
+      "from": "respond",
+      "to": "retry",
+      "label": "LLM 실패",
+      "variant": "dashed",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 44
+    },
+    {
+      "id": "retry-context",
+      "from": "retry",
+      "to": "context",
+      "label": "sweeper 재실행",
+      "variant": "dashed",
+      "role": "return",
+      "fromSide": "left",
+      "toSide": "left"
+    },
+    {
+      "id": "retry-handoff",
+      "from": "retry",
+      "to": "handoff",
+      "label": "5번째 실패 · llm_error",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "right",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "판단 규칙",
+      "items": [
+        "gate1 1 IGNORE · 2 통째 HANDOFF · 3 no_progress · 4 low_confidence · 5 round_limit · 6 unclear · 7 out_of_knowledge · 8 COMPOSE",
+        "gate2 9 guard_failed · 10 SHADOW · 11 ANSWER_AND_HANDOFF · 12 DRAFT · needsHandoff 면 규칙 없이 HANDOFF"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "수신 · 검사",
+      "items": [
+        "① 케이스에 묶인 스레드 id → In-Reply-To·References · 새 메시지면 이전 PENDING 초안 STALE",
+        "⑦ guard 는 fact_off_intent·no_fact 까지 · 재작성 1회 · ⑨ 케이스가 바뀌면 ABORTED, 낡은 초안은 CARRY_OVER"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "장애 · 자동 발송",
+      "items": [
+        "LLM 연속 5번 실패면 60초 llm_unavailable · 예산 소진은 재시도 없이 넘김",
+        "L2 = AUTO_SEND 켬 · 팩·intent L2 · 신뢰 발신자 · 섀도 아님일 때 agent:auto 승인 → 발송 · H·넘김은 자동 발송 없음"
+      ]
+    }
+  ]
+}
