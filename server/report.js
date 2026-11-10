@@ -168,4 +168,19 @@ function workload({ from, to, channel } = {}) {
   };
 }
 
-module.exports = { budget, llmUsage, promotionByIntent, promotionCsv, unratedShadow, workload, WORKLOAD_SQL };
+/**
+ * 매뉴얼 보강 목록: 답장 Agent가 지식베이스에 없다고 남긴 질문(판정 기록 respond 출력의 knowledgeGaps). 최신순, 질문은 저장 때 이미 가렸다.
+ * byNearest = 가장 가까웠던 절별 건수 — 어느 절을 보강하면 되는지 본다(가까운 절이 없으면 '(없음)').
+ */
+function knowledgeGaps({ channel, limit = 50 } = {}) {
+  const items = [];
+  for (const r of db.all(`SELECT d.output, d.created_at, c.channel, d.case_id FROM decisions d JOIN cases c ON c.id = d.case_id
+    WHERE d.step = 'respond' AND d.output LIKE '%"knowledgeGaps"%' AND (? IS NULL OR c.channel = ?) ORDER BY d.created_at DESC, d.rowid DESC`, channel || null, channel || null)) {
+    for (const g of JSON.parse(r.output).knowledgeGaps || []) items.push({ channel: r.channel, caseRef: r.case_id.slice(0, 8), at: r.created_at, question: g.question, nearestKeys: g.nearestKeys || [] });
+  }
+  const byNearest = {};
+  for (const it of items) for (const k of it.nearestKeys.length ? it.nearestKeys : ['(없음)']) byNearest[k] = (byNearest[k] || 0) + 1;
+  return { total: items.length, byNearest, items: items.slice(0, Math.min(Math.max(1, Number(limit) || 50), 200)) };
+}
+
+module.exports = { budget, llmUsage, promotionByIntent, promotionCsv, unratedShadow, workload, knowledgeGaps, WORKLOAD_SQL };

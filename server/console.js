@@ -1,5 +1,5 @@
 'use strict';
-// 고객 관리 KB·정책 콘솔 — 검사, L2 게이트, 게시 트랜잭션(게시·되돌리기·복원), 초안과 매뉴얼 변환 작업, 기동 점검, 라우트.
+// 고객 관리 지식베이스·정책 콘솔 — 검사, L2 게이트, 게시 트랜잭션(게시·되돌리기·복원), 초안과 매뉴얼 변환 작업, 기동 점검, 라우트.
 // 라이브 = 대상(policy:<ch>, kb:<ch>:<lang>)별 seq가 가장 큰 config_changes 행이 가리키는 versions 원문. 행이 없거나 reset이면 이미지 파일.
 // 하한은 policy.load 경로(problems)가 모든 팩에 지킨다. 여기서는 같은 함수를 게시 전에 먼저 부른다.
 const fs = require('node:fs');
@@ -224,7 +224,7 @@ function policyWarnings(ch, liveRaw, pack) {
   }
   const keys = new Set(LANGS.flatMap((l) => Object.keys(kb.load(ch, l).sections)));
   for (const [k, d] of Object.entries(isObj(pack.intents) ? pack.intents : {})) {
-    for (const key of arr(d?.kb)) if (!keys.has(key)) out.push({ path: `intents.${k}.kb`, code: 'kb_key_missing', key, msg: `라이브 KB에 ${key} 절이 없다` });
+    for (const key of arr(d?.kb)) if (!keys.has(key)) out.push({ path: `intents.${k}.kb`, code: 'kb_key_missing', key, msg: `라이브 지식베이스에 ${key} 절이 없다` });
   }
   return out;
 }

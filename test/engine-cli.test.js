@@ -293,9 +293,9 @@ test('AC-D9 render triage: system에 support intent 전부, schema = triage.SCHE
   const tEn = put('t9en.json', { ...RECEIPT, language: 'en' });
   const en = await cli(['render', 'responder', '--channel', 'support', '--kb', path.join(ROOT, 'kb', 'support.en.md'), '--triage', tEn], msg({ body: 'Where can I get my receipt?' }));
   assert.equal(en.code, 0);
-  assert.match(en.out.user, /고객이 영어로 썼다 — 본문은 영어로 쓴다\. 사실은 지식 베이스에 있는 것만\(영어 KB\)/);
+  assert.match(en.out.user, /고객이 영어로 썼다 — 본문은 영어로 쓴다\. 사실은 지식베이스에 있는 것만\(영어 지식베이스\)/);
   const enKo = await cli(['render', 'responder', '--channel', 'support', '--kb', KB, '--triage', tEn], msg({ body: 'Where can I get my receipt?' }));
-  assert.match(enKo.out.user, /한국어 KB를 뜻 그대로 옮긴다/);
+  assert.match(enKo.out.user, /한국어 지식베이스를 뜻 그대로 옮긴다/);
   assert.equal((await cli(['render', 'triage', '--channel', 'support', '--kb', KB], msg({ text: 'x' }))).code, 2, '문의 JSON 모양');
 });
 

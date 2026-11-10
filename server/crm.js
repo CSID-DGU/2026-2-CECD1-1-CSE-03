@@ -238,11 +238,22 @@ function listView(docs, q = {}) {
   return { items, counts, subCounts };
 }
 
+// 상세 화면의 에이전트 기록 — 판단 기록 전체가 아니라 접수 Agent 감정 신호와 답장 Agent 툴 기록만 골라 낸다(본문·입력 요약·버전은 싣지 않는다).
+const AGENT_LOG_KEYS = { triage: ['sentiment', 'urgency', 'threat', 'customerWants'], respond: ['mode', 'steps', 'trace', 'stepCap', 'knowledgeGaps'] };
+function agentLog(rows = []) {
+  return rows.filter((d) => AGENT_LOG_KEYS[d.step]).map((d) => {
+    let o = d.output;
+    if (typeof o === 'string') { try { o = JSON.parse(o); } catch { o = null; } }
+    o = o || {};
+    return { id: d.id, step: d.step, at: d.created_at ?? null, output: Object.fromEntries(AGENT_LOG_KEYS[d.step].filter((k) => o[k] !== undefined).map((k) => [k, o[k]])) };
+  });
+}
+
 /**
  * 상세 응답. related = 이 케이스와 이어진 케이스 문서(지금은 비어 있다 — 종결 뒤 회신은 같은 케이스를 다시 연다), events = 이 케이스 수신 이벤트 문서, activities = 활동 문서.
  * 초안 셋은 drafts 행(getCase 모양) 또는 이미 줄인 모양 — 화면에 필요한 칸만 남긴다. 판단·규칙·프롬프트 해시는 없다.
  */
-function detailView({ doc, revision, contact = null, company = null, related = [], events = [], activities = [], pendingDraft = null, shadowDraft = null, sendingDraft = null }) {
+function detailView({ doc, revision, contact = null, company = null, related = [], events = [], activities = [], pendingDraft = null, shadowDraft = null, sendingDraft = null, agentLog = [] }) {
   const pd = pendingDraft && { id: pendingDraft.id, intent: pendingDraft.intent ?? null, action: pendingDraft.action ?? null, body: pendingDraft.original_body ?? pendingDraft.body ?? null, preview: pendingDraft.preview ?? null, kbPassages: pendingDraft.kbPassages ?? {} };
   const sd = shadowDraft && { id: shadowDraft.id, body: shadowDraft.original_body ?? shadowDraft.body ?? null };
   const xd = sendingDraft && { id: sendingDraft.id, needsSendCheck: !!(sendingDraft.needs_send_check ?? sendingDraft.needsSendCheck) };
@@ -255,12 +266,12 @@ function detailView({ doc, revision, contact = null, company = null, related = [
     ...activities.filter((a) => !(a.type === 'email' && a.direction === 'inbound')).map((a) => ({ kind: 'activity', at: a.occurredAt, activity: a })),
   ].sort((a, b) => cmp(a.at, b.at) || cmp(a.kind === 'inbound' ? 0 : 1, b.kind === 'inbound' ? 0 : 1) || cmp(a.eventId ?? a.activity.id, b.eventId ?? b.activity.id));
   return {
-    case: doc, revision, contact, company, relatedCases, timeline, pendingDraft: pd || null, shadowDraft: sd || null, sendingDraft: xd || null,
+    case: doc, revision, contact, company, relatedCases, timeline, pendingDraft: pd || null, shadowDraft: sd || null, sendingDraft: xd || null, agentLog,
     actions: actionsFor(doc, { pendingDraft: pd, shadowDraft: sd, sendingDraft: xd }),
   };
 }
 
-module.exports = {
+module.exports = { agentLog,
   projectCase, projectActivities, eventFromMessage, contactKey, companyDomain, actionsFor, badFilter, listView, detailView,
   FILTERS, STATUSES, SUB_STATUSES, CASE_TYPES, CASE_REASONS, CLOSE_REASONS, PRIORITIES, ORIGINS,
 };

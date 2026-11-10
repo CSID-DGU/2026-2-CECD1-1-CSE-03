@@ -14,7 +14,7 @@ const REASON = {
   refund_request: '환불 요청', billing_dispute: '결제 분쟁', data_export: '데이터 반출', complaint: '불만·항의', legal_threat: '법적 언급',
   human_request: '사람 연결 요청', call_meeting: '통화·미팅 요청', contract_documents: '계약 서류', purchase_intent: '진행 의사', price_contract: '금액·계약 조건',
   list_request: '명단 요청', pricing: '요금 문의', policy_exception: '정책 예외', account_identity: '본인 확인 필요', injection: '지시 변경 시도',
-  custom_data: '맞춤 데이터 요청', out_of_knowledge: 'KB에 없음', low_confidence: '확신 낮음', no_progress: '같은 질문 반복', round_limit: '왕복 한도',
+  custom_data: '맞춤 데이터 요청', out_of_knowledge: '지식베이스에 없음', low_confidence: '확신 낮음', no_progress: '같은 질문 반복', round_limit: '왕복 한도',
   guard_failed: '검사 실패', llm_error: 'LLM 장애', internal_error: '내부 오류', unclear: '뜻 불분명', sender_changed: '보낸 사람 바뀜', sender_unverified: '발신자 인증 실패',
   language_unsupported: '지원 안 하는 언어', discarded: '초안 폐기',
 };

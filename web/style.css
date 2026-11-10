@@ -502,3 +502,17 @@ a.btn { display: inline-flex; align-items: center; color: var(--text); text-deco
   .path .step-btn { padding: 4px 4px 4px 13px; font-size: 11px; } /* 다섯 단계가 한 줄에 */
   .path .step:first-child .step-btn { padding-left: 8px; }
 }
+
+/* 고객 감정 · 답장 Agent 툴 기록 */
+.mood-line { display: inline-flex; gap: 4px; margin-left: 6px; vertical-align: middle; }
+.chip.mood-3 { background: var(--warn-soft); color: var(--warn); }
+.chip.mood-4, .chip.mood-5 { background: var(--danger-soft); color: var(--danger); font-weight: 600; }
+.toollog { margin: 8px 16px; }
+.toollog summary { cursor: pointer; margin-bottom: 0; }
+.toollog[open] summary { margin-bottom: 8px; }
+.toollog-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.toollog-head { display: flex; gap: 8px; align-items: baseline; }
+.toollog ul { margin: 2px 0 0; padding-left: 16px; }
+.toollog-call { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.toollog-gaps { margin-top: 8px; }
+.signals { margin: 8px 16px; }

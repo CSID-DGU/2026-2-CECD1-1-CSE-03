@@ -48,7 +48,8 @@ let budgetWarnedDay = null;
  * 호출마다 성공·실패 모두 llm_calls 한 행(오류는 코드·HTTP 상태만 — 응답 본문은 넣지 않는다).
  * 단순화: provider 재시도 1회(llm/index.js)는 같은 meta를 덮어써 앞 시도의 토큰은 세지 않는다.
  */
-async function call({ agent, system, user, schema, ctx, source, maxTokens, timeoutMs, effort, breaker }) {
+// 예산 확인 + 소요 시간 + llm_calls 한 행. send(meta)가 실제 provider 호출이다.
+async function metered({ agent, ctx, source }, send) {
   const promptVersion = sha(source);
   db.saveVersion(promptVersion, `prompt:${agent}`, source);
   const b = report.budget();
@@ -61,9 +62,7 @@ async function call({ agent, system, user, schema, ctx, source, maxTokens, timeo
   const t0 = Date.now();
   let error = null;
   try {
-    // maxTokens·timeoutMs·effort·breaker는 넘긴 호출만 provider로 간다(기존 호출자의 요청 모양은 그대로).
-    const extra = Object.fromEntries(Object.entries({ maxTokens, timeoutMs, effort, breaker }).filter(([, v]) => v !== undefined));
-    const result = await llm.json({ agent, system, user, schema, ctx, meta, ...extra });
+    const result = await send(meta);
     return { result, latencyMs: Date.now() - t0, promptVersion, usage: meta };
   } catch (e) {
     error = String(e?.code || e?.status || e?.name || 'error');
@@ -76,4 +75,16 @@ async function call({ agent, system, user, schema, ctx, source, maxTokens, timeo
   }
 }
 
-module.exports = { persona, factsBlock, historyBlock, decisionsBlock, promptSource, call, sha };
+// maxTokens·timeoutMs·effort·breaker는 넘긴 호출만 provider로 간다(기존 호출자의 요청 모양은 그대로).
+const given = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+
+async function call({ agent, system, user, schema, ctx, source, maxTokens, timeoutMs, effort, breaker }) {
+  return metered({ agent, ctx, source }, (meta) => llm.json({ agent, system, user, schema, ctx, meta, ...given({ maxTokens, timeoutMs, effort, breaker }) }));
+}
+
+/** 툴 호출 한 걸음. ReAct 루프가 걸음마다 부른다 — 걸음마다 llm_calls 한 행이라 걸음별 시간·토큰이 남는다. */
+async function chat({ agent, system, messages, tools, ctx, source, maxTokens, timeoutMs, effort }) {
+  return metered({ agent, ctx, source }, (meta) => llm.chat({ agent, system, messages, tools, ctx, meta, ...given({ maxTokens, timeoutMs, effort }) }));
+}
+
+module.exports = { persona, factsBlock, historyBlock, decisionsBlock, promptSource, call, chat, sha };

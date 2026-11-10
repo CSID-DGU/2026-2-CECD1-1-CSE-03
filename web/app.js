@@ -29,7 +29,7 @@ const LABELS = {
     human_request: '사람 연결 요청', call_meeting: '통화·미팅 요청', contract_documents: '계약 서류', purchase_intent: '진행 의사', price_contract: '금액·계약 조건',
     list_request: '명단 요청', pricing: '요금 문의', policy_exception: '정책 예외', account_identity: '본인 확인 필요', injection: '지시 변경 시도',
     custom_data: '맞춤 데이터 요청', custom_quote: '맞춤 견적', pricing_exception: '요금 예외', access_grant: '권한·라이선스 부여', trial_access: '체험 권한',
-    out_of_knowledge: 'KB에 없음', low_confidence: '확신 낮음', no_progress: '같은 질문 반복', round_limit: '왕복 한도', guard_failed: '검사 실패',
+    out_of_knowledge: '지식베이스에 없음', low_confidence: '확신 낮음', no_progress: '같은 질문 반복', round_limit: '왕복 한도', guard_failed: '검사 실패',
     llm_error: 'LLM 장애', internal_error: '내부 오류', unclear: '뜻 불분명', sender_changed: '보낸 사람 바뀜', sender_unverified: '발신자 인증 실패', language_unsupported: '지원 안 하는 언어',
     discarded: '초안 폐기', auto_reply_or_empty: '자동 회신·빈 메일', internal_sender: '사내 발신', responder_human: '사람이 맡은 케이스',
     case_changed: '회차 중 상황 바뀜', shadow: '섀도 채널', ack: '감사·확인 인사', ignore: '무시 대상', answer_and_handoff: '답장 + 넘김',
@@ -38,7 +38,7 @@ const LABELS = {
     takeover: '사람이 인수', discard: '초안 폐기', human_reply: '사람이 직접 답장', return: '에이전트에게 반환',
     // guard·검수 위반 코드
     amount: '금액 언급', contact: '연락처 노출', date_promise: '날짜 약속', date: '날짜 언급', emoji: '이모지', empty: '빈 본문', forbidden_word: '금지어',
-    link_not_in_kb: 'KB에 없는 링크', too_long: '너무 김', unknown_fact: '근거 없는 사실', unresolved_slot: '자리표시 남음', not_answered: '질문에 답 안 함',
+    link_not_in_kb: '지식베이스에 없는 링크', too_long: '너무 김', unknown_fact: '근거 없는 사실', unresolved_slot: '자리표시 남음', not_answered: '질문에 답 안 함',
     no_fact: '근거 절 표시 없음', fact_off_intent: '문의 유형 밖 근거',
     // 원문 파기 사유
     retention: '보존 기간 만료', subject_request: '정보주체 요청',
@@ -475,7 +475,7 @@ function caseRow(c) {
   },
   h('td', { class: 'no num', text: c.caseNumber || shortId(c.id) }),
   h('td', { class: 'subj' }, // 제목 위, 문의자(고객사) 아래 — 두 줄 한 칸
-    h('span', { class: 'subj-line', text: c.subject || '(제목 없음)', title: c.subject || '' }), h('span', { class: 'who-line' }, whoCell(c))),
+    h('span', { class: 'subj-line', text: c.subject || '(제목 없음)', title: c.subject || '' }), h('span', { class: 'who-line' }, whoCell(c), moodChip(c.signals))),
   h('td', { text: label('caseType', c.caseType) || '–' }),
   h('td', { text: label('caseReason', c.caseReason) || '–' }),
   h('td', {}, priorityText(c.priority) || '–'),
@@ -692,6 +692,7 @@ function renderDetail() {
       S.flash && S.flash.caseId === c.id ? flashBanner() : null,
       actions.has('resolve_sending') && d.sendingDraft ? sendCheckPanel(d.sendingDraft) : null),
     h('div', { class: 'detail-summary' }, fieldPanel(c), resultCard(c)),
+    signalPanel(d.agentLog), ...toolLogSections(d.agentLog),
     h('section', { class: 'detail-body', 'aria-label': '대화' },
       h('h3', { class: 'sec-title', text: '대화' }),
       conversation(d.timeline || []),
@@ -834,6 +835,61 @@ function resultCard(c) {
   return h('section', { class: 'card result', 'aria-label': '처리 결과' },
     h('div', { class: 'card-title', text: '처리 결과' }),
     rows.length ? h('dl', {}, rows.map(([k, v]) => [h('dt', { text: k }), h('dd', { text: v })])) : h('p', { class: 'muted', text: '아직 결과가 없습니다' }));
+}
+// ---------- 고객 감정 신호 · 답장 Agent 툴 기록 ----------
+// 서버가 준 에이전트 기록(d.agentLog: step·output)에서만 그린다. 없으면 아무것도 그리지 않는다.
+const MOOD = { 1: '차분', 2: '약간 불편', 3: '불만', 4: '화남', 5: '매우 화남' };
+const URGENCY = { low: '낮음', normal: '보통', high: '높음' };
+const TOOL_LABEL = {
+  search_knowledge_base: '지식베이스 찾기', read_knowledge_base: '지식베이스 읽기', report_knowledge_gap: '지식베이스 빈 곳 남기기',
+  search_past_cases: '지난 케이스 조회', get_customer_record: '고객 기록 조회', lookup_order: '주문 조회', lookup_billing: '결제·구독 조회',
+  read_official_page: '공식 사이트 읽기', check_draft: '초안 검사', submit_draft: '초안 제출', request_handoff: '사람에게 넘김',
+};
+const decisionOut = (x) => {
+  let o = x && x.output;
+  if (typeof o === 'string') { try { o = JSON.parse(o); } catch { o = null; } }
+  return o && typeof o === 'object' ? o : null;
+};
+const moodLevel = (n) => (Number.isInteger(n) && n >= 1 && n <= 5 ? n : null);
+/** 목록 한 줄 옆의 「고객 감정」 칩 — 감정 단계(1 차분 … 5 매우 화남)와 위협 신호. */
+function moodChip(sig) {
+  const n = sig && moodLevel(sig.sentiment);
+  if (!n && !(sig && sig.threat)) return null;
+  return h('span', { class: 'mood-line' },
+    n ? h('span', { class: `chip mood mood-${n}`, title: '고객 감정', text: `고객 감정 ${n} ${MOOD[n]}` }) : null,
+    sig.threat ? h('span', { class: 'chip warn', text: '위협' }) : null);
+}
+function signalPanel(decisions) {
+  const t = (decisions || []).filter((x) => x.step === 'triage').map(decisionOut).filter(Boolean).at(-1);
+  const n = t && moodLevel(t.sentiment);
+  if (!n) return null;
+  const rows = [
+    ['감정 단계', h('span', { class: `chip mood mood-${n}`, text: `${n} ${MOOD[n]}` })],
+    ['긴급도', URGENCY[t.urgency]],
+    ['위협 신호', typeof t.threat === 'boolean' ? (t.threat ? '있음' : '없음') : null],
+    ['원하는 것', t.customerWants],
+  ].filter(([, v]) => v);
+  return h('section', { class: 'card signals', 'aria-label': '고객 감정 신호' },
+    h('div', { class: 'card-title', text: '고객 감정 신호' }),
+    h('dl', {}, rows.map(([k, v]) => [h('dt', { text: k }), h('dd', {}, v)])));
+}
+function toolLogSections(decisions) {
+  return (decisions || []).filter((x) => x.step === 'respond').map(decisionOut).filter((o) => o && o.mode === 'react' && Array.isArray(o.trace)).map(toolLogSection);
+}
+function toolLogSection(o) {
+  const gaps = Array.isArray(o.knowledgeGaps) ? o.knowledgeGaps : [];
+  return h('details', { class: 'card toollog' },
+    h('summary', { class: 'card-title' }, '답장 Agent 툴 기록', h('span', { class: 'chip', text: `총 ${o.steps ?? o.trace.length}걸음` }), o.stepCap ? h('span', { class: 'chip warn', text: '걸음 상한 도달' }) : null),
+    h('ol', { class: 'toollog-steps' }, o.trace.map((st, i) => h('li', {},
+      h('div', { class: 'toollog-head' }, h('b', { text: `${st.step ?? i + 1}걸음` }), st.llmMs != null ? h('span', { class: 'muted', text: `모델 ${st.llmMs}ms` }) : null),
+      (st.calls || []).length
+        ? h('ul', {}, st.calls.map((c) => h('li', { class: 'toollog-call' },
+          h('span', { text: TOOL_LABEL[c.tool] || String(c.tool) }),
+          h('span', { class: c.ok ? 'chip' : 'chip warn', text: c.ok ? '성공' : '실패' }),
+          c.toolMs != null ? h('span', { class: 'muted', text: `${c.toolMs}ms` }) : null)))
+        : h('p', { class: 'muted', text: '툴 호출 없음' })))),
+    gaps.length ? h('div', { class: 'toollog-gaps' }, h('b', { text: '지식베이스에 없던 질문' }),
+      h('ul', {}, gaps.map((g) => h('li', {}, g.question, Array.isArray(g.nearestKeys) && g.nearestKeys.length ? h('span', { class: 'muted', text: ` (가까운 항목: ${g.nearestKeys.join(', ')})` }) : null)))) : null);
 }
 function conversation(timeline) {
   if (!timeline.length) return h('div', { class: 'empty', text: '아직 기록이 없습니다' });
@@ -1011,8 +1067,8 @@ function approvalPanel(c, dr, actions) {
       h('span', { class: 'chip dr-PENDING', text: '승인 대기 초안' }),
       intentChip(dr.intent),
       dr.action === 'ANSWER_AND_HANDOFF' ? h('span', { class: 'warn-text', text: '발송 후 사람 전담으로 전환됩니다' }) : null),
-    facts.length ? h('div', { class: 'facts' }, '근거(KB):', facts.map((f) => h('span', { class: 'chip fact', text: f }))) : h('div', { class: 'facts', text: '근거(KB): 없음 — 사실 주장이 있으면 확인하세요' }),
-    facts.length ? h('details', { class: 'kb-passages' }, h('summary', { text: '근거 KB 원문 보기' }),
+    facts.length ? h('div', { class: 'facts' }, '근거(지식베이스):', facts.map((f) => h('span', { class: 'chip fact', text: f }))) : h('div', { class: 'facts', text: '근거(지식베이스): 없음 — 사실 주장이 있으면 확인하세요' }),
+    facts.length ? h('details', { class: 'kb-passages' }, h('summary', { text: '근거 지식베이스 원문 보기' }),
       Object.entries(dr.kbPassages).map(([k, t]) => h('div', { class: 'kb-passage' }, h('b', { text: k }), h('div', { text: t })))) : null,
     ta,
     dr.preview ? h('details', { class: 'preview' }, h('summary', { text: '발송 미리보기(원문 기준 — 고친 본문은 승인 때 다시 검사)' }), h('pre', { text: dr.preview })) : null,

@@ -6,7 +6,7 @@ const { maskContacts } = require('../guard');
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['intent', 'handoffReason', 'confidence', 'kbHit', 'kbSections', 'riskSignals', 'questionSummary', 'handoffTopic', 'repeatsPrevious', 'language', 'evidence'],
+  required: ['intent', 'handoffReason', 'confidence', 'kbHit', 'kbSections', 'riskSignals', 'questionSummary', 'handoffTopic', 'repeatsPrevious', 'language', 'evidence', 'sentiment', 'urgency', 'threat', 'customerWants'],
   properties: {
     intent: { type: 'string' },
     handoffReason: { anyOf: [{ type: 'string' }, { type: 'null' }] },
@@ -19,6 +19,10 @@ const SCHEMA = {
     repeatsPrevious: { type: 'boolean' },
     language: { type: 'string', enum: ['ko', 'en'] },
     evidence: { type: 'array', items: { type: 'string' } },
+    sentiment: { type: 'integer', enum: [1, 2, 3, 4, 5] },
+    urgency: { type: 'string', enum: ['low', 'normal', 'high'] },
+    threat: { type: 'boolean' },
+    customerWants: { type: 'string' },
   },
 };
 
@@ -30,6 +34,7 @@ ${Object.entries(pack.intents).map(([k, v]) => `- ${k}(${v.level || '-'})${v.des
 handoffReason으로 쓸 수 있는 값: ${pack.handoffReasons.join(', ')} — 사람 신호가 없으면 null.
 kbSections에는 답에 쓸 지식 베이스 절 이름만(kb: 접두어 없이). handoff·ack·ignore면 kbHit "false", kbSections 빈 배열.
 language는 고객 메시지의 언어(ko|en). 이 채널이 받는 언어: ${(pack.languages || ['ko']).join(', ')}.
+감정 신호(표시용 — intent·handoffReason 판단에 섞지 않는다): sentiment는 고객이 쓴 말에서 읽히는 만큼만 1(차분)·2(약간 불편)·3(불만)·4(화남)·5(매우 화남)로 매기고 짐작으로 올리지 않는다. urgency는 기한·재촉 표현이 있으면 high, 급하지 않다고 하면 low, 그 밖은 normal. threat는 위협·협박·폭언·자해 언급이 있으면 true. customerWants는 고객이 원하는 것을 80자 안으로.
 출력은 JSON만. 설명·코드펜스 금지.`;
 
 const user = (ctx) => `지식 베이스(절 머리 ## kb:키 — 여기 있는 것만 답할 수 있는 사실이다):
@@ -68,6 +73,10 @@ const normalize = (r) => ({
   evidence: (r.evidence || []).map(maskContacts),
   language: r.language === 'en' ? 'en' : 'ko',
   repeatsPrevious: !!r.repeatsPrevious,
+  sentiment: Math.min(5, Math.max(1, Math.round(Number(r.sentiment)) || 1)),
+  urgency: ['low', 'normal', 'high'].includes(r.urgency) ? r.urgency : 'normal',
+  threat: r.threat === true,
+  customerWants: maskContacts(r.customerWants || '').slice(0, 80),
 });
 
 const SOURCE = promptSource('triage', system, user);

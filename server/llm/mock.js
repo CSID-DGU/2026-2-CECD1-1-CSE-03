@@ -42,7 +42,7 @@ const NEXT_ACTION = {
   data_export: '본인 확인 후 데이터 반출 범위·형식 확인', complaint: '사과 + 사실관계 확인 후 직접 회신', legal_threat: '법무 공유 후 직접 회신',
   human_request: '담당자가 직접 연락', call_meeting: '통화 가능 시간 제안', contract_documents: '계약 서류 발송', purchase_intent: '신청서 안내 및 계약 진행',
   price_contract: '견적서 작성 후 발송', policy_exception: '요금 정책 예외 가능 여부 확인', pricing: '요금 안내', injection: '무시 또는 정중히 범위 안내',
-  unclear: '고객에게 요청 사항 재확인', out_of_knowledge: 'KB 보강 검토 후 직접 회신', llm_error: '수동 응대', guard_failed: '초안 수정 후 직접 회신',
+  unclear: '고객에게 요청 사항 다시 확인', out_of_knowledge: '지식베이스 보강 검토 후 직접 회신', llm_error: '수동 응대', guard_failed: '초안 수정 후 직접 회신',
   low_confidence: '문의 의도 확인', no_progress: '같은 질문 반복 — 직접 설명', round_limit: '왕복 한도 — 직접 마무리',
 };
 
@@ -50,7 +50,18 @@ const firstSentence = (s) => String(s || '').trim().split(/(?<=[.!?])\s+|\n/)[0]
 const mask = (s) => String(s || '').replace(CONTACT_RE, '[연락처]');
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
 
+// 감정 신호 — 키워드 등급(표시 전용, 판정에는 쓰지 않는다)
 function triage(ctx) {
+  const body = ctx.message?.body_clean || '';
+  const hits = (re) => (body.match(re) || []).length;
+  const threat = /죽|가만 안|찾아가|가만두지/.test(body);
+  const sentiment = Math.min(5, 1 + Math.min(hits(/사기|화나|짜증|최악|신고|고소|황당|어이없/g), 3) + (threat ? 1 : 0) + (/!{2,}/.test(body) ? 1 : 0));
+  const urgency = /급해|빨리|오늘|당장|즉시/.test(body) ? 'high' : 'normal';
+  const customerWants = mask(firstSentence(body)).slice(0, 80);
+  return { ...triageIntent(ctx), sentiment, urgency, threat, customerWants };
+}
+
+function triageIntent(ctx) {
   const body = ctx.message?.body_clean || '';
   const pack = ctx.pack;
   const language = /[가-힣]/.test(body) ? 'ko' : 'en';
@@ -134,6 +145,50 @@ function convert(ctx) {
   return { sections, omitted: [] };
 }
 
+// ReAct 흉내(답장 Agent만): 지금까지 부른 툴과 결과를 대화에서 읽어 다음 툴 하나를 고른다.
+// (이전 문의를 가리키면 search_past_cases, 소속 회사를 말하면 get_customer_record, 주문·배송을 물으면 lookup_order, 결제·환불·구독을 물으면 lookup_billing — 노출됐을 때만) →
+// read_knowledge_base(필요한 절) → check_draft → 위반이면 걸린 구절을 걷어내 다시 check_draft → 통과하면 submit_draft.
+// 지식베이스에 없어 넘길 때는 search_knowledge_base → report_knowledge_gap → request_handoff.
+const PAST_RE = /지난번|저번|이전에\s*문의|전에\s*(문의|말씀|여쭤)|last time|previously/i;
+const COMPANY_RE = /저희\s*회사|우리\s*회사|저희\s*팀|회사\s*계정|our company|our team/i;
+const ORDER_RE = /주문|배송|택배|order|shipping/i;
+const BILLING_RE = /결제|환불|구독|요금|청구|자동결제|billing|refund|charge|subscription/i;
+function chat({ agent, ctx, messages = [], tools = [] }) {
+  if (agent !== 'responder') throw new Error(`mock chat: 알 수 없는 agent ${agent}`);
+  const calls = [];
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue;
+    for (const b of m.content) {
+      if (b.type === 'tool_use') calls.push({ id: b.id, name: b.name, input: b.input });
+      if (b.type === 'tool_result') { const c = calls.find((x) => x.id === b.tool_use_id); if (c) c.result = JSON.parse(b.content); }
+    }
+  }
+  const use = (name, input) => ({ content: [{ type: 'tool_use', id: `toolu_mock_${calls.length + 1}`, name, input }], stopReason: 'tool_use' });
+  const has = (name) => tools.some((t) => t.name === name);
+  const called = (name) => calls.some((c) => c.name === name);
+  const body = ctx.message?.body_clean || '';
+  if (has('search_past_cases') && !called('search_past_cases') && PAST_RE.test(body)) return use('search_past_cases', {});
+  if (has('get_customer_record') && !called('get_customer_record') && COMPANY_RE.test(body)) return use('get_customer_record', {});
+  if (has('lookup_order') && !called('lookup_order') && ORDER_RE.test(body)) return use('lookup_order', {});
+  if (has('lookup_billing') && !called('lookup_billing') && BILLING_RE.test(body)) return use('lookup_billing', {});
+  const d = respond(ctx);
+  if (d.needsHandoff && d.handoffReason === 'out_of_knowledge') {
+    const q = ctx.triage?.questionSummary || firstSentence(body);
+    if (has('search_knowledge_base') && !called('search_knowledge_base')) return use('search_knowledge_base', { query: q });
+    if (has('report_knowledge_gap') && !called('report_knowledge_gap')) return use('report_knowledge_gap', { question: q, nearestKeys: [] });
+  }
+  if (d.needsHandoff) return use('request_handoff', { reason: d.handoffReason });
+  if (d.usedFacts.length && !called('read_knowledge_base')) return use('read_knowledge_base', { keys: d.usedFacts });
+  const last = [...calls].reverse().find((c) => c.name === 'check_draft' || c.name === 'submit_draft');
+  if (!last) return use('check_draft', { body: d.body, usedFacts: d.usedFacts });
+  if (last.result?.ok) return use('submit_draft', { body: last.input.body, usedFacts: last.input.usedFacts, humanCommitments: d.humanCommitments });
+  let fixed = last.input.body;
+  for (const v of last.result?.violations || []) if (v.quote) fixed = fixed.split(v.quote).join('');
+  fixed = fixed.replace(/[ \t]{2,}/g, ' ').trim();
+  if (!fixed || fixed === last.input.body) return use('request_handoff', { reason: 'guard_failed' });
+  return use('check_draft', { body: fixed, usedFacts: last.input.usedFacts });
+}
+
 async function json({ agent, ctx }) {
   if (process.env.LLM_MOCK_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.LLM_MOCK_DELAY_MS)));
   switch (agent) {
@@ -146,4 +201,9 @@ async function json({ agent, ctx }) {
   }
 }
 
-module.exports = { json, RULES, triage, respond, review, brief };
+async function chatDelayed(req) {
+  if (process.env.LLM_MOCK_DELAY_MS) await new Promise((r) => setTimeout(r, Number(process.env.LLM_MOCK_DELAY_MS)));
+  return chat(req);
+}
+
+module.exports = { json, chat: chatDelayed, RULES, triage, respond, review, brief };

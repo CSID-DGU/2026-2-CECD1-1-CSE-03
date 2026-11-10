@@ -704,10 +704,11 @@ test('I16 CRM API — 목록 필터·counts·subCounts·400, 상세 actions·트
       r = await get(base, `/api/crm/cases?q=${encodeURIComponent(QUERY)}`);
       assert.equal(r.status, 200); assert.equal(r.body.items.length, 0);
 
-      // 상세 — 승인 대기 초안, 계약 키만(판단·회차·버전 트레이스 없음)
+      // 상세 — 승인 대기 초안, 계약 키만(판단·회차·버전 기록 없음). agentLog는 접수 감정 신호·답장 툴 기록만 골라 낸 것
       r = await get(base, `/api/crm/cases/${a.caseId}`);
       assert.equal(r.status, 200);
-      assert.deepEqual(Object.keys(r.body).sort(), ['actions', 'case', 'company', 'contact', 'pendingDraft', 'relatedCases', 'revision', 'sendingDraft', 'shadowDraft', 'timeline']);
+      assert.deepEqual(Object.keys(r.body).sort(), ['actions', 'agentLog', 'case', 'company', 'contact', 'pendingDraft', 'relatedCases', 'revision', 'sendingDraft', 'shadowDraft', 'timeline']);
+      for (const e of r.body.agentLog) assert.ok(Object.keys(e.output).every((k) => ['sentiment', 'urgency', 'threat', 'customerWants', 'mode', 'steps', 'trace', 'stepCap', 'knowledgeGaps'].includes(k)), JSON.stringify(e));
       assert.deepEqual(r.body.actions, ['approve', 'edit_approve', 'discard', 'takeover', 'note', 'close']);
       assert.equal(r.body.pendingDraft.id, pending(a.caseId).id); assert.match(r.body.pendingDraft.preview, /영수증/);
       assert.ok(!/prompt_hash|promptHash|"decisions"|"loop"|lease_token/.test(JSON.stringify(r.body)));
