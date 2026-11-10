@@ -1,0 +1,53 @@
+{
+  "_note": "가상 데이터 — 고객사 주문·결제 시스템이 정해지기 전 툴 시험용. 이름·주소·번호 모두 지어낸 값이고, 이메일은 server/mock/inquiries.js의 합성 고객과 맞춘다.",
+  "billing": [
+    {
+      "email": "minjun.choi@example.com",
+      "subscription": { "plan": "프로 월간", "status": "active", "billingCycle": "monthly", "nextBillingAt": "2026-12-03T00:00:00Z", "autoRenew": true },
+      "payments": [
+        { "paymentId": "PAY-20261103-4821", "paidAt": "2026-11-03T00:10:00Z", "status": "paid", "method": "card", "amount": 29000, "refund": { "status": "requested", "requestedAt": "2026-11-04T02:00:00Z", "completedAt": null } },
+        { "paymentId": "PAY-20261003-1177", "paidAt": "2026-10-03T00:10:00Z", "status": "paid", "method": "card", "amount": 29000, "refund": null }
+      ]
+    },
+    {
+      "email": "woojin.jung@example.com",
+      "subscription": { "plan": "팀 월간", "status": "active", "billingCycle": "monthly", "nextBillingAt": "2026-12-05T00:00:00Z", "autoRenew": true },
+      "payments": [
+        { "paymentId": "PAY-20261105-9001", "paidAt": "2026-11-05T01:00:00Z", "status": "paid", "method": "card", "amount": 99000, "refund": null },
+        { "paymentId": "PAY-20261105-9002", "paidAt": "2026-11-05T01:00:40Z", "status": "paid", "method": "card", "amount": 99000, "refund": null },
+        { "paymentId": "PAY-20261005-5310", "paidAt": "2026-10-05T01:00:00Z", "status": "paid", "method": "card", "amount": 99000, "refund": null }
+      ]
+    },
+    {
+      "email": "seoyeon.park@example.com",
+      "subscription": { "plan": "베이직 월간", "status": "active", "billingCycle": "monthly", "nextBillingAt": "2026-11-20T00:00:00Z", "autoRenew": true },
+      "payments": [
+        { "paymentId": "PAY-20261020-2208", "paidAt": "2026-10-20T00:00:00Z", "status": "paid", "method": "transfer", "amount": 9900, "refund": null }
+      ]
+    },
+    {
+      "email": "hayul.kwon@example.com",
+      "subscription": { "plan": "프로 연간", "status": "canceled", "billingCycle": "yearly", "nextBillingAt": null, "autoRenew": false },
+      "payments": [
+        { "paymentId": "PAY-20261012-6650", "paidAt": "2026-10-12T00:00:00Z", "status": "refunded", "method": "card", "amount": 290000, "refund": { "status": "completed", "requestedAt": "2026-10-13T00:00:00Z", "completedAt": "2026-10-16T00:00:00Z" } }
+      ]
+    },
+    {
+      "email": "alex.kim@example.com",
+      "subscription": { "plan": "Pro monthly", "status": "past_due", "billingCycle": "monthly", "nextBillingAt": "2026-11-10T00:00:00Z", "autoRenew": true },
+      "payments": [
+        { "paymentId": "PAY-20261101-7741", "paidAt": "2026-11-01T00:00:00Z", "status": "failed", "method": "card", "amount": 29000, "refund": null }
+      ]
+    }
+  ],
+  "orders": [
+    {
+      "orderNumber": "ORD-20261102-3301", "email": "jiwoo.han@example.com", "status": "배송 중", "orderedAt": "2026-11-02T03:00:00Z", "shippedAt": "2026-11-03T08:00:00Z", "deliveredAt": null,
+      "items": [{ "name": "보안 키 2개 묶음", "qty": 1 }], "carrier": "택배", "trackingStatus": "간선 이동", "amount": 45000, "address": "가상시 가상구 1"
+    },
+    {
+      "orderNumber": "ORD-20261015-1180", "email": "jiwoo.han@example.com", "status": "배송 완료", "orderedAt": "2026-10-15T03:00:00Z", "shippedAt": "2026-10-16T08:00:00Z", "deliveredAt": "2026-10-18T05:00:00Z",
+      "items": [{ "name": "교육 자료 인쇄본", "qty": 3 }], "carrier": "택배", "trackingStatus": "배송 완료", "amount": 15000, "address": "가상시 가상구 1"
+    }
+  ]
+}

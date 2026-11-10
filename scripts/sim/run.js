@@ -35,7 +35,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const refuse = (m) => Object.assign(new Error(`거부: ${m}`), { exitCode: 2 });
 const budgetError = () => Object.assign(new Error('sim_budget'), { code: 'sim_budget' });
 const getJson = async (http, url) => {
-  const r = await http(url);
+  // 서버가 쉬던 keep-alive 소켓을 닫는 순간 그 소켓을 다시 쓰면 ECONNRESET — 읽기만 하는 GET이라 한 번 다시 묻는다
+  const r = await http(url).catch((e) => { if (e?.cause?.code === 'ECONNRESET') return http(url); throw e; });
   if (!r.ok) throw new Error(`GET ${new URL(url).pathname} ${r.status}`);
   return r.json();
 };
@@ -433,7 +434,7 @@ function simHashes() {
 
 // 실행끼리 비교하는 칸만
 const comparable = (m) => ({ setSha256: m.set?.sha256 ?? null, personasSha256: m.personasSha256 ?? null, versions: m.versions ?? null,
-  sim: m.sim ?? null, models: m.models ?? null, autoSend: m.autoSend ?? null });
+  sim: m.sim ?? null, models: m.models ?? null, autoSend: m.autoSend ?? null, responderMode: m.responderMode ?? 'single' }); // 칸이 없던 실행은 single뿐이었다
 
 function prices(env = process.env) {
   const n = (v) => (String(v ?? '').trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
@@ -587,6 +588,7 @@ async function runMain(argv) {
   const meta = {
     runId, set: { version: set.version, name: set.name, sha256: set.sha256 }, personasSha256: set.personasSha256,
     split: o.split, subset: o.subset, repeat: o.repeat, provider: o.provider, models: o.models, autoSend: o.autoSend,
+    responderMode: process.env.RESPONDER_MODE === 'single' ? 'single' : 'react', // 답장 Agent 방식(single 한 번 호출 · react 툴 루프)
     versions: Object.fromEntries(Object.entries(versions).map(([k, v]) => [k, [...v].sort()])), baseline,
     maxTokens: o.maxTokens, approvedBy: o.approvedBy, startedAt, endedAt: new Date().toISOString(), sim: simHashes(), tokens,
     unsettled, // 기다린 뒤에도 돌던 케이스 수(0이 정상)

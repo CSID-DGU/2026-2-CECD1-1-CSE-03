@@ -15,7 +15,12 @@ for (const k of ['AUTO_SEND', 'SHADOW_CHANNELS', 'INBOUND_SECRET', 'AUTH_USER_HE
 
 // 가상 시계 — 합성 문의가 몇 시간에 걸쳐 들어온 것처럼 타임스탬프를 벌린다. 서버 모듈을 읽기 전에 건다.
 const RealDate = Date;
-let skew = -9 * 3600e3;
+// 타임라인(약 7.5시간)과 대조가 UTC 자정을 넘으면 '오늘 인입'이 서버 스냅숏과 대조 사이에 달라진다 — 넘을 것 같으면 전날 안으로 당긴다.
+const SPAN = 8 * 3600e3;
+let start = RealDate.now() - 9 * 3600e3;
+const midnight = new RealDate(start + SPAN); midnight.setUTCHours(0, 0, 0, 0);
+if (midnight.getTime() > start) start = midnight.getTime() - SPAN;
+let skew = start - RealDate.now();
 global.Date = class extends RealDate {
   constructor(...a) { if (a.length) super(...a); else super(RealDate.now() + skew); }
   static now() { return RealDate.now() + skew; }
@@ -138,6 +143,11 @@ function protoCore(DATA, req, hooks) {
       decisions: d.decisions, handoffs: d.handoffs, activities: d.activities, loop: d.loop };
   }
   const lastBy = (arr, key) => arr.reduce((b, x, i) => (!b || x[key] > b.x[key] || (x[key] === b.x[key] && i > b.i) ? { x, i } : b), null)?.x || null;
+  function signalsOf(d) { // 최신 접수 판단의 감정 신호 — 목록 두 곳이 같이 쓴다
+    const tri = [...d.decisions].reverse().find((r) => r.step === 'triage');
+    const o = tri && (typeof tri.output === 'string' ? JSON.parse(tri.output) : tri.output);
+    return o ? { sentiment: o.sentiment ?? null, urgency: o.urgency ?? null, threat: o.threat ?? null } : null;
+  }
   function listRow(d, all) {
     const c = clone(d.case);
     const last = lastBy(d.messages, 'occurred_at');
@@ -147,7 +157,8 @@ function protoCore(DATA, req, hooks) {
     return { ...c, threadId: d.threadIds[0] ?? null, lastMessageAt: last ? last.occurred_at : null, lastMessageDirection: last ? last.direction : null,
       lastMessagePreview: last ? [...String(last.body_clean)].slice(0, 120).join('') : null, pendingDraftId: pend ? pend.id : null,
       sameEmailOpenCases: all.filter((o) => o.case.customer_email === c.customer_email && o.case.id !== c.id && o.case.state !== 'CLOSED').length,
-      reaskedAfterHandoff: c.state === 'HANDED_OFF' && d.messages.some((m) => m.direction === 'in' && m.occurred_at > since) };
+      reaskedAfterHandoff: c.state === 'HANDED_OFF' && d.messages.some((m) => m.direction === 'in' && m.occurred_at > since),
+      signals: signalsOf(d) };
   }
   function listCases({ state, channel, q, limit = 50 } = {}) {
     const states = state ? String(state).split(',') : null; const like = q ? String(q).toLowerCase() : null;
@@ -559,7 +570,9 @@ function protoCore(DATA, req, hooks) {
   }
   function crmList(q) {
     const bad = crm.badFilter(q); if (bad) fail(400, 'bad_filter', { field: bad });
-    return crm.listView([...store.keys()].map((id) => crmCase(id).doc), q);
+    const view = crm.listView([...store.keys()].map((id) => crmCase(id).doc), q);
+    view.items = view.items.map((x) => ({ ...x, signals: signalsOf(store.get(x.id)) }));
+    return view;
   }
   function crmDetail(id) {
     const x = crmCase(id) || fail(404, 'case 없음');
@@ -571,6 +584,7 @@ function protoCore(DATA, req, hooks) {
       activities: crm.projectActivities(store.get(id), x.ctx),
       pendingDraft: g.drafts.filter((y) => y.status === 'PENDING').at(-1) ?? null,
       shadowDraft: g.drafts.filter((y) => y.status === 'SHADOW' && !rated.has(y.id)).at(-1) ?? null,
+      agentLog: crm.agentLog(g.decisions),
     });
   }
   /** 화면이 본 revision이 지금과 다르면 409 stale(index.js fresh). 보내지 않았으면 검사하지 않는다. */

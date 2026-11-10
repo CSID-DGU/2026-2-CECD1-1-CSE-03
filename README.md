@@ -19,7 +19,7 @@
           → 검수 Agent(내용 판단) → 처리 방식 최종 판단(코드) → 발송 · 승인 대기 · 사람에게 넘김
 ```
 
-- 채널(고객문의 · 온보딩 · 영업 문의)은 **정책 팩 JSON + KB 마크다운**으로 추가한다. 루프 코드는 채널을 모른다.
+- 채널(고객문의 · 온보딩 · 영업 문의)은 **정책 팩 JSON + 지식베이스 마크다운**으로 추가한다. 루프 코드는 채널을 모른다.
 - 자동 발송은 `AUTO_SEND=0` 한 줄로 전부 끈다. 대시보드 지표는 1차 응대율 · 완전 자동응대 · 넘김 · 응대 못함.
 - 케이스 상태는 신규 · 응대 중 · 보류 · 사람 전담 · 종결 5단계이고, 칸반은 승인 대기 칸을 따로 둔다. 종결한 케이스에 고객이 회신하면 같은 케이스가 다시 열린다.
 - 의존성 0 — Node 22 내장 모듈(`node:http` · `node:sqlite` · `node:test` · `fetch` · `node:tls`)만 쓴다.
@@ -52,21 +52,21 @@ node --no-warnings=ExperimentalWarning scripts/subject-request.js export <email>
 | 초안 승인 | 카드 상세의 초안 패널 — 「승인」(원문 그대로) · 「수정 후 승인」(본문을 고치고 수정 사유 체크) · 「폐기」 |
 | 사람이 직접 처리 | 「인수」로 가져오고 「직접 답장」 · 「메모」 · 「보류」(메모 필수) · 「종결」(사유 필수), 다시 맡기려면 「반환」 |
 | 상태 바꾸기 | 칸반 카드를 다른 칸에 끌어 놓거나 상세의 진행 단계를 누른다 |
-| KB · 정책 고치기 | 상단 「지식·정책」 — 편집은 `ADMIN_USERS`에 적은 사람만. 매뉴얼 파일을 KB 초안으로 바꾸는 「매뉴얼 변환」 포함 |
+| 지식베이스 · 정책 고치기 | 상단 「지식·정책」 — 편집은 `ADMIN_USERS`에 적은 사람만. 매뉴얼 파일을 지식베이스 초안으로 바꾸는 「매뉴얼 변환」 포함 |
 | 운영 숫자 보기 | 상단 「리포트」 — 업무 대체 비율, LLM 호출 · 토큰 · 비용 |
 
 ## 폴더 구조
 
 | 경로 | 무엇 |
 |---|---|
-| `server/` | 서버 전체. 진입점 `index.js`(HTTP · SSE · 라우트), 에이전트 루프 `loop.js`, 1차 거르기 `prefilter.js`, 본문 검사 `guard.js`, 정책 판단 `policy.js`, KB 로더 `kb.js`, 저장소 `store.js` · `db.js` · `schema.sql`, CRM 투영 `crm.js` · `collections.js` · `cases.js`, 콘솔 `console.js` · `convert.js`(매뉴얼 → KB), 리포트 `report.js`, 보존 · 파기 `retention.js`, 접속기록 `accesslog.js`, 스위퍼 `sweeper.js`, 알림 `notify.js`, AWS 서명 `aws.js` |
-| `server/agents/` | 네 에이전트 — 접수 `triage.js` · 답장 `responder.js` · 검수 `reviewer.js` · 인계 `briefer.js`, 페르소나 문서 `personas.md` |
+| `server/` | 서버 전체. 진입점 `index.js`(HTTP · SSE · 라우트), 에이전트 루프 `loop.js`, 1차 거르기 `prefilter.js`, 본문 검사 `guard.js`, 정책 판단 `policy.js`, 지식베이스 로더 `kb.js`, 저장소 `store.js` · `db.js` · `schema.sql`, CRM 투영 `crm.js` · `collections.js` · `cases.js`, 콘솔 `console.js` · `convert.js`(매뉴얼 → 지식베이스), 리포트 `report.js`, 보존 · 파기 `retention.js`, 접속기록 `accesslog.js`, 스위퍼 `sweeper.js`, 알림 `notify.js`, AWS 서명 `aws.js` |
+| `server/agents/` | 네 에이전트 — 접수 `triage.js` · 답장 `responder.js` · 검수 `reviewer.js` · 인계 `briefer.js`, 페르소나 문서 `personas.md`, 답장 Agent 툴 `tools.js` |
 | `server/llm/` | 모델 어댑터 — `mock.js` · `anthropic.js`, 선택은 `index.js` |
 | `server/mail/` | 발송 어댑터 — `mock.js` · `smtp.js` |
 | `server/mock/` | 합성 문의 세트 `inquiries.js`, `npm run demo` · `npm run sim` 본체 |
 | `web/` | 백오피스 화면 (바닐라 HTML · CSS · JS, 빌드 없음). `app.js`는 목록 · 칸반 · 상세 · 리포트, `console.js`는 지식·정책 콘솔 |
 | `policy/` | 채널 정책 팩 — `support.json` · `onboarding.json` · `sales.json` |
-| `kb/` | 채널 KB — `support.md` · `support.en.md` · `onboarding.md` · `sales.md` |
+| `kb/` | 채널 지식베이스 — `support.md` · `support.en.md` · `onboarding.md` · `sales.md` |
 | `scripts/` | 서버 밖에서 도는 도구. 수신 어댑터 `inbound-imap.js`(IMAP, 미러 모드) · `inbound-ses.js`(SES → S3 → SQS), 메일 왕복 데모 `demo-mail.js`, 실데이터 평가 `eval-real.js`, 감사 내보내기 `audit-export.js`, 정보주체 요청 `subject-request.js`, 검사 도구 CLI `engine.js`(플러그인과 같이 씀), 단일 HTML 프로토타입 빌드 `build-prototype.js` |
 | `scripts/sim/` | 고객 시뮬레이터 — 시나리오 · 초안 · 채점 · 실행(`npm run sim:eval`) |
 | `eval/` | 고정 평가 세트 v1 — 시나리오 120건 `scenarios.v1.jsonl`, 고객 페르소나, 해시 목록 `MANIFEST.json`, 출처 표시 `SOURCES.md` |
@@ -90,7 +90,7 @@ node --no-warnings=ExperimentalWarning scripts/subject-request.js export <email>
 **11월 8일 — 파일럿 준비**
 - CRM 문서 투영(케이스 · 활동 · 문의자 · 고객사 · 수신 이벤트), 원문 파기, 접속기록
 - LLM 사용량 · 비용 기록, 일일 토큰 예산, 운영 리포트
-- 지식·정책 콘솔과 매뉴얼 → KB 변환, 정책 하한, 개인정보 마스킹 확대
+- 지식·정책 콘솔과 매뉴얼 → 지식베이스 변환, 정책 하한, 개인정보 마스킹 확대
 - 백오피스 개편, 칸반을 노션 보드 형태(상태 알약 · 속성 칩)로
 - IMAP 미러 모드 · DMARC 판정, 감사 내보내기, 정보주체 요청
 - 고객 시뮬레이터와 고정 평가 세트 v1
@@ -112,6 +112,7 @@ node --no-warnings=ExperimentalWarning scripts/subject-request.js export <email>
 | [`docs/architecture.md`](docs/architecture.md) | 네 페르소나 · 한 회차 루프 · 정책 팩 · 처리 방식 · 불변식 |
 | [`docs/e2e.md`](docs/e2e.md) | 문의 한 통이 들어와서 나가기까지 |
 | [`docs/states.md`](docs/states.md) | 코드가 쓰는 상태 · 코드 값 색인 |
+| [`docs/tools.md`](docs/tools.md) | 답장 Agent 툴 — 목록 · 한 사이클 · 작성 규칙 · 안전 규칙 · 기록 |
 | [`docs/db.md`](docs/db.md) | 테이블 · 제약 · ER · SQLite→Postgres |
 | [`docs/deployment.md`](docs/deployment.md) | 로컬 vs 배포 · 환경 변수 · Dockerfile · 웹훅 · 단계적 도입 · 파일럿 운영 체크리스트 |
 | [`docs/compliance.md`](docs/compliance.md) | 고객사 약관 · 처리방침에 넣을 AI 응대 고지 문안 템플릿 (법률 자문 아님) |

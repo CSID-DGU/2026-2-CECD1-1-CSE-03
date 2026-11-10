@@ -204,6 +204,7 @@ function crmDetail(id) {
     activities: store.find('activities', { caseId: id }),
     pendingDraft: pending ? full.find((d) => d.id === pending.id) : null,
     shadowDraft: drafts.filter((d) => d.status === 'SHADOW' && !rated.has(d.id)).at(-1) ?? null,
+    agentLog: crm.agentLog(db.all("SELECT id, step, created_at, output FROM decisions WHERE case_id=? AND step IN ('triage','respond') ORDER BY created_at, rowid", id)),
     sendingDraft: sending ? full.find((d) => d.id === sending.id) : null,
   });
 }
@@ -226,6 +227,12 @@ const CORE = [
       return Number.isNaN(t) ? fail(400, 'bad_date', { field: k }) : new Date(t).toISOString();
     };
     return report.workload({ from: iso('from'), to: iso('to'), channel: q.channel || null });
+  }],
+  // 매뉴얼 보강 목록 — 고객 질문에서 온 글(가린 뒤)이라 섀도 목록처럼 접속기록을 남긴다
+  ['GET', /^\/api\/report\/knowledge-gaps$/, (_m, q, _b, ctx) => {
+    const g = report.knowledgeGaps({ channel: q.channel, limit: q.limit });
+    accesslog.write({ action: 'knowledge_gaps.list', ...ctx, channel: q.channel ?? null, count: g.items.length });
+    return g;
   }],
   ['GET', /^\/api\/shadow$/, (_m, q, _b, ctx) => {
     const items = report.unratedShadow({ channel: q.channel, limit: q.limit });
@@ -253,6 +260,8 @@ const CORE = [
     const field = crm.badFilter(q);
     if (field) fail(400, 'bad_filter', { field });
     const view = crm.listView(store.all('cases'), q);
+    const sig = cases.signalsFor(view.items.map((d) => d.id));
+    view.items = view.items.map((d) => ({ ...d, signals: sig.get(d.id) || null })); // 접수 Agent 감정 신호(목록 칩)
     // 검색어는 고객 주소·이름일 수 있다 — 원값 대신 유무·길이만
     const filters = Object.fromEntries(Object.keys(crm.FILTERS).filter((k) => q[k]).map((k) => [k, q[k]]));
     accesslog.write({ action: 'crm.case.list', ...ctx, filters: { ...filters, limit: q.limit, hasQuery: !!q.q, qLen: (q.q || '').length }, count: view.items.length });

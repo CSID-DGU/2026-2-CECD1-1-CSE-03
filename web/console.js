@@ -1,6 +1,6 @@
 'use strict';
 // 지식·정책 화면 — app.js 다음에 로드한다. app.js의 h, api, post, humanError, clear, $, reviewer, S를 그대로 쓴다.
-// 모든 텍스트는 textContent로 넣는다(LLM이 만든 KB도 글자로만 보인다).
+// 모든 텍스트는 textContent로 넣는다(LLM이 만든 지식베이스도 글자로만 보인다).
 (() => {
   const CH_RE = /^[a-z][a-z0-9_]{1,39}$/;
   const RESERVED = ['ack', 'ignore', 'injection', 'human_request'];
@@ -8,7 +8,7 @@
   const SYSTEM_REASONS = ['unclear', 'out_of_knowledge', 'low_confidence', 'no_progress', 'round_limit', 'guard_failed', 'llm_error', 'internal_error', 'language_unsupported', 'discarded'];
   const LEVELS = ['L0', 'L1', 'L2', 'H'];
   const UPLOAD_MAX = 10 * 1024 * 1024;
-  const TABS = [['channels', '채널'], ['kb', 'KB'], ['policy', '정책'], ['convert', '매뉴얼 변환'], ['history', '기록']];
+  const TABS = [['channels', '채널'], ['kb', '지식베이스'], ['policy', '정책'], ['convert', '매뉴얼 변환'], ['history', '기록']];
 
   const ERR_TEXT = {
     console_write_untrusted: '이 접속 경로로는 편집할 수 없습니다.',
@@ -16,7 +16,7 @@
     stale: '그 사이 다른 곳에서 먼저 바뀌었습니다. 새로 불러온 뒤 다시 시도하세요.',
     hash_collision: '같은 번호의 다른 내용이 이미 있어 게시하지 않았습니다. 잠시 뒤 다시 시도하세요.',
     history_mismatch: '기록과 저장된 내용이 맞지 않아 이 버전은 쓸 수 없습니다.',
-    ko_first: '영어 KB는 한국어 KB를 먼저 게시한 뒤에 올릴 수 있습니다.',
+    ko_first: '영어 지식베이스는 한국어 지식베이스를 먼저 게시한 뒤에 올릴 수 있습니다.',
     draft_busy: '변환이 진행 중이라 지금은 저장하거나 게시할 수 없습니다.',
     no_channel: '이 채널을 찾을 수 없습니다.',
     bad_channel: '채널 이름이 올바르지 않습니다.',
@@ -33,7 +33,7 @@
     no_change: '해당 기록을 찾을 수 없습니다.',
     draft_closed: '이미 게시했거나 폐기한 초안입니다.',
     no_draft: '초안을 찾을 수 없습니다.',
-    bad_raw: 'KB 원문 형식이 올바르지 않습니다.',
+    bad_raw: '지식베이스 원문 형식이 올바르지 않습니다.',
     bad_file: '파일을 읽을 수 없습니다. 다른 형식으로 저장해 다시 올려 주세요.',
     bad_encoding: '글자 인코딩을 읽을 수 없습니다. UTF-8로 저장해 다시 올려 주세요.',
     count_unavailable: '분량을 재지 못해 변환을 시작하지 않았습니다. 잠시 뒤 다시 시도하세요.',
@@ -54,7 +54,7 @@
     [/^languages/, '자동 응대 언어를 늘립니다.'],
     [/\.level$/, '이 intent를 자동 발송(L2)으로 올립니다.'],
     [/\.description$/, '설명이 바뀌어 문의가 이 intent로 분류되는 범위가 달라질 수 있습니다.'],
-    [/\.kb/, '자동 발송이 근거로 쓸 수 있는 KB 절이 늘어납니다.'],
+    [/\.kb/, '자동 발송이 근거로 쓸 수 있는 지식베이스 절이 늘어납니다.'],
     [/^answerable/, '자동 발송할 수 있는 넘김 사유를 늘립니다.'],
     [/^handoffReasons/, '사람에게 넘기던 사유를 빼서 넘김이 줄어듭니다.'],
     [/^thresholds/, '자동 발송 기준을 느슨하게 합니다.'],
@@ -229,18 +229,18 @@
         h('td', {}, kbCell),
         h('td', {}, h('span', { class: 'num', text: c.policy.version || '–' }), ' ', chip(c.policy.live ? '고객 수정' : '이미지 기본값')),
         h('td', {},
-          demo ? h('div', { class: 'warn-text', text: '출하 데모 내용 — 고객 KB 게시 전 자동 발송 금지' }) : null,
+          demo ? h('div', { class: 'warn-text', text: '출하 데모 내용 — 고객 지식베이스 게시 전 자동 발송 금지' }) : null,
           invalid ? h('div', { class: 'danger-text', text: '저장된 설정을 쓸 수 없어 이 채널은 모든 문의를 사람에게 넘기는 중' }) : null,
           !demo && !invalid ? h('span', { class: 'muted', text: '–' }) : null),
         h('td', {}, btn('열기', () => { C.channel = c.channel; C.draftId = null; go('kb'); }, 'btn-sm')));
     });
     root.append(h('div', { class: 'ctable-wrap' }, h('table', { class: 'ctable' },
-      h('thead', {}, h('tr', {}, ['채널', '표시 이름', 'KB', '정책 버전', '상태', ''].map((t) => h('th', { scope: 'col', text: t })))),
+      h('thead', {}, h('tr', {}, ['채널', '표시 이름', '지식베이스', '정책 버전', '상태', ''].map((t) => h('th', { scope: 'col', text: t })))),
       h('tbody', {}, rows))));
     root.append(h('p', { class: 'hint', text: '새 채널 만들기는 아직 지원하지 않습니다.' }));
   }
 
-  // ---------- KB ----------
+  // ---------- 지식베이스 ----------
   async function viewKb(root) {
     if (C.draftId) return viewDraft(root);
     const my = C.seq;
@@ -315,7 +315,7 @@
     if (d.status === 'failed' || dr.error) root.append(h('div', { class: 'form-error', role: 'alert', text: `변환이 끝까지 가지 못했습니다${dr.error ? ` (${dr.error})` : ''}. 끝난 부분은 아래 초안에 남아 있습니다.` }));
     if (d.report) root.append(reportPanel(d.report, d.sourceText));
 
-    const ta = ctl('textarea', 'KB 원문', { id: 'draft-raw', rows: '24', spellcheck: 'false', readonly: !editable, class: 'raw-edit' });
+    const ta = ctl('textarea', '지식베이스 원문', { id: 'draft-raw', rows: '24', spellcheck: 'false', readonly: !editable, class: 'raw-edit' });
     ta.value = d.raw || '';
     const checkSlot = h('div', { id: 'draft-check' });
     const diffSlot = h('div', { id: 'draft-diff' });
@@ -347,13 +347,13 @@
       const chName = dr.channel || C.channel;
       const submit = (note, ack) => send(`/api/console/drafts/${encodeURIComponent(id)}/publish`, { baseHash: base, revision: st.revision, note, ack });
       replace(slot, publishPanel({
-        channel: chName, title: 'KB를 게시합니다', confirmText: '게시',
+        channel: chName, title: '지식베이스를 게시합니다', confirmText: '게시',
         impact: st.impact && st.impact.l2Impact, hosts: st.impact && st.impact.newLinkHosts, packRows: (C.packs[chName] || {}).promotion,
         submit, demote: (names, note) => demoteIntents(chName, names, note),
         onDone: () => { C.draftId = null; C.packs = {}; reload(); },
       }));
     }
-    const left = h('div', { class: 'col' }, field('KB 원문', ta), h('div', { class: 'row-gap' }, saveBtn, pubBtn,
+    const left = h('div', { class: 'col' }, field('지식베이스 원문', ta), h('div', { class: 'row-gap' }, saveBtn, pubBtn,
       isAdmin() && d.status !== 'published' && d.status !== 'discarded' ? btn('초안 폐기', () => discardPanel(slot, id), 'btn-danger') : null, dirtyNote), slot, checkSlot);
     if (!isAdmin()) left.append(h('p', { class: 'hint', text: '읽기 전용입니다. 편집 권한이 있는 사용자만 저장·게시할 수 있습니다.' }));
     root.append(h('div', { class: 'split' }, left, h('div', { class: 'col' }, diffSlot)));
@@ -385,7 +385,7 @@
   const secText = (s) => (s == null ? '' : typeof s === 'string' ? s : [s.title ? `제목: ${s.title}` : '', s.source ? `출처: ${s.source}` : '', s.body ?? s.text ?? ''].filter(Boolean).join('\n'));
   function diffView(df, sourceText) {
     const items = normDiff(df).filter((x) => x.op !== 'unchanged');
-    if (!items.length) return h('p', { class: 'muted', text: '라이브 KB와 달라진 절이 없습니다.' });
+    if (!items.length) return h('p', { class: 'muted', text: '라이브 지식베이스와 달라진 절이 없습니다.' });
     const OP = { added: '추가', changed: '변경', removed: '삭제' };
     return h('div', { class: 'diff' }, items.map((x) => h('div', { class: `dcard op-${x.op}` },
       h('div', { class: 'row-gap' }, chip(OP[x.op] || x.op), h('code', { text: x.key })),
@@ -451,7 +451,7 @@
       if (imp && (imp.intents || []).length) {
         const blocked = (imp.blocked || []).length > 0;
         kids.push(h('div', { class: 'gate' },
-          h('p', { class: 'warn-text', text: '이 채널에는 지금 자동으로 발송되는 intent가 있습니다. KB 전체가 그 답장을 만드는 데 쓰이므로 어느 절을 바꿔도 확인이 필요합니다.' }),
+          h('p', { class: 'warn-text', text: '이 채널에는 지금 자동으로 발송되는 intent가 있습니다. 지식베이스 전체가 그 답장을 만드는 데 쓰이므로 어느 절을 바꿔도 확인이 필요합니다.' }),
           h('ul', { class: 'plain' }, imp.intents.map((n) => h('li', {}, h('code', { text: nm(n) }), ` — ${metric(rowsOf(nm(n)))}`))),
           (imp.keys || []).length ? h('p', { class: 'hint', text: `바뀌는 절: ${imp.keys.join(', ')}` }) : null));
         if (blocked) {
@@ -526,11 +526,11 @@
     if (channelCritical > 0) p.maxLevel = 'L1';
     return p;
   }
-  // KB 게시가 막혔을 때: 영향 intent만 L1로 바꾼 정책을 먼저 게시한다
+  // 지식베이스 게시가 막혔을 때: 영향 intent만 L1로 바꾼 정책을 먼저 게시한다
   async function demoteIntents(channel, names, note) {
     const res = await get(`/api/console/policy/${encodeURIComponent(channel)}`);
     const pack = JSON.parse(res.raw);
-    await send(`/api/console/policy/${encodeURIComponent(channel)}/publish`, { pack: demoted(pack, names, 0), baseVersion: res.version, note: note || 'KB 게시를 위해 L1로 내림' });
+    await send(`/api/console/policy/${encodeURIComponent(channel)}/publish`, { pack: demoted(pack, names, 0), baseVersion: res.version, note: note || '지식베이스 게시를 위해 L1로 내림' });
   }
 
   // ---------- 매뉴얼 변환 ----------
@@ -678,7 +678,7 @@
         const lv = ctl('select', `${name} 등급`, { disabled: !can || reserved || reasonLocked });
         for (const l of LEVELS) lv.append(h('option', { value: l, selected: it.level === l, text: l }));
         lv.addEventListener('change', () => { it.level = lv.value; if (it.level === 'L2' && !Array.isArray(it.kb)) it.kb = []; touch(); });
-        const kbs = ctl('select', `${name} KB 절`, { multiple: true, size: '3', disabled: !can });
+        const kbs = ctl('select', `${name} 지식베이스 절`, { multiple: true, size: '3', disabled: !can });
         for (const k of new Set([...kbKeys, ...(it.kb || [])])) kbs.append(h('option', { value: k, selected: (it.kb || []).includes(k), text: k }));
         kbs.addEventListener('change', () => { const v = [...kbs.selectedOptions].map((o) => o.value); if (v.length || it.level === 'L2') it.kb = v; else delete it.kb; touch(); });
         const rs = ctl('select', `${name} 넘김 사유`, { disabled: !can || reserved || reasonLocked });
@@ -699,7 +699,7 @@
     };
     drawIntents();
     form.append(sec('intent 표', h('div', { class: 'ctable-wrap' }, h('table', { class: 'ctable itable' },
-      h('thead', {}, h('tr', {}, ['이름', '설명', '등급', 'KB 절', '넘김 사유', '문의 유형', '문의 사유', '승격 지표', '액션', ''].map((t) => h('th', { scope: 'col', text: t })))), tbody)),
+      h('thead', {}, h('tr', {}, ['이름', '설명', '등급', '지식베이스 절', '넘김 사유', '문의 유형', '문의 사유', '승격 지표', '액션', ''].map((t) => h('th', { scope: 'col', text: t })))), tbody)),
     can ? addRow('새 intent 이름', CH_RE, (v) => { if (!pack().intents[v]) { pack().intents[v] = { level: 'L1', caseType: 'Question', caseReason: 'other' }; touch(); drawIntents(); } }) : null));
     root.append(form);
 
@@ -784,10 +784,10 @@
   async function viewHistory(root) {
     const my = C.seq;
     const kindSel = ctl('select', '종류', { id: 'hist-kind' });
-    for (const [v, t] of [['', '전체'], ['kb', 'KB'], ['policy', '정책']]) kindSel.append(h('option', { value: v, text: t, selected: v === (C.histKind || '') }));
+    for (const [v, t] of [['', '전체'], ['kb', '지식베이스'], ['policy', '정책']]) kindSel.append(h('option', { value: v, text: t, selected: v === (C.histKind || '') }));
     kindSel.addEventListener('change', () => { C.histKind = kindSel.value; render(); });
     root.append(h('div', { class: 'row-gap' }, field('종류', kindSel),
-      isAdmin() ? btn('KB를 이미지 기본값으로 복원', () => resetPanel('kb'), 'btn-danger btn-sm') : null,
+      isAdmin() ? btn('지식베이스를 이미지 기본값으로 복원', () => resetPanel('kb'), 'btn-danger btn-sm') : null,
       isAdmin() ? btn('정책을 이미지 기본값으로 복원', () => resetPanel('policy'), 'btn-danger btn-sm') : null));
     const slot = h('div', { id: 'hist-slot' });
     const listEl = h('div', { id: 'hist-list' }, h('p', { class: 'muted', text: '불러오는 중…' }));
@@ -800,7 +800,7 @@
       h('thead', {}, h('tr', {}, ['언제', '누가', '무엇을', '버전', '메모', ''].map((t) => h('th', { scope: 'col', text: t })))),
       h('tbody', {}, items.map((it) => h('tr', {},
         h('td', { text: when(it.created_at) }), h('td', { text: it.actor || '' }),
-        h('td', { text: `${it.kind === 'kb' ? `KB(${it.language === 'en' ? '영어' : '한국어'})` : '정책'} ${ACTION[it.action] || it.action}` }),
+        h('td', { text: `${it.kind === 'kb' ? `지식베이스(${it.language === 'en' ? '영어' : '한국어'})` : '정책'} ${ACTION[it.action] || it.action}` }),
         h('td', {}, h('code', { text: `${it.from_hash || '–'} → ${it.to_hash || '이미지'}` })), h('td', { text: it.note || '' }),
         h('td', {}, btn('내용 보기', () => showContent(it, slot), 'btn-sm'),
           isAdmin() && it.action !== 'reset' ? btn('이 버전으로 되돌리기', () => rollbackPanel(it, slot), 'btn-sm') : null))))) : h('p', { class: 'muted', text: '기록이 없습니다.' }));
@@ -826,7 +826,7 @@
       } else {
         const cur = await get(`/api/console/kb/${encodeURIComponent(chName)}`, { lang: it.language || C.lang });
         replace(slot, publishPanel({
-          channel: chName, title: '이 KB 버전으로 되돌립니다', confirmText: '되돌리기', packRows: (C.packs[chName] || {}).promotion,
+          channel: chName, title: '이 지식베이스 버전으로 되돌립니다', confirmText: '되돌리기', packRows: (C.packs[chName] || {}).promotion,
           submit: (note, ack) => send(`/api/console/kb/${encodeURIComponent(chName)}/rollback`, { changeId: it.id, baseHash: cur.srcHash, note, ack }),
           demote: (names, note) => demoteIntents(chName, names, note), onCancel: () => replace(slot), onDone: () => { C.packs = {}; reload(); },
         }));
@@ -842,7 +842,7 @@
     };
     go2().then((cur) => {
       replace(slot, publishPanel({
-        channel: chName, title: kind === 'policy' ? '정책을 이미지 기본값으로 복원합니다' : 'KB를 이미지 기본값으로 복원합니다(한국어·영어 모두)', confirmText: '복원', packRows: (C.packs[chName] || {}).promotion,
+        channel: chName, title: kind === 'policy' ? '정책을 이미지 기본값으로 복원합니다' : '지식베이스를 이미지 기본값으로 복원합니다(한국어·영어 모두)', confirmText: '복원', packRows: (C.packs[chName] || {}).promotion,
         submit: (note, ack) => (kind === 'policy' ? send(`/api/console/policy/${encodeURIComponent(chName)}/reset`, { baseVersion: cur.version, note })
           : send(`/api/console/kb/${encodeURIComponent(chName)}/reset`, { baseHash: cur.srcHash, note, ack })),
         demote: kind === 'kb' ? (names, note) => demoteIntents(chName, names, note) : null,

@@ -46,7 +46,7 @@ test('style.css: 지표 타일은 줄어들어 잘리지 않고, 자리가 모�
   assert.match(rule('.topbar-right'), /margin-left:\s*auto/);
 });
 
-test('CRM 화면: /api/crm/ 목록·상세, 상태 탭 5개+전체(role=tablist), 트레이스·라이브 피드·버전 다이얼로그·재오픈 없음', () => {
+test('CRM 화면: /api/crm/ 목록·상세, 상태 탭 5개+전체(role=tablist), 라이브 피드·버전 다이얼로그·재오픈 없음', () => {
   assert.match(app, /api\(`\/api\/crm\/cases\?/);
   assert.match(app, /api\(`\/api\/crm\/cases\/\$\{/);
   assert.doesNotMatch(app, /api\(`\/api\/cases[?/]/, '목록·상세는 컬렉션(/api/crm/)만 읽는다');
@@ -61,7 +61,8 @@ test('CRM 화면: /api/crm/ 목록·상세, 상태 탭 5개+전체(role=tablist)
   assert.match(html, /<table class="case-table">/);
   for (const src of [app, html, read('style.css')]) {
     assert.doesNotMatch(src, /reopen|재오픈/);
-    assert.doesNotMatch(src, /trace|트레이스|live-feed|에이전트 라이브|version-dialog|\/api\/versions/);
+    // 실시간 단계 피드·버전 다이얼로그는 없다. 답장 Agent 툴 기록(판정 기록의 trace)은 상세에서 보여 준다 — test/dashboard-trace.test.js
+    assert.doesNotMatch(src, /트레이스|live-feed|에이전트 라이브|version-dialog|\/api\/versions/);
   }
   assert.doesNotMatch(app, /'agent\.step'/, '단계 이벤트를 받지 않는다');
 });
@@ -202,7 +203,7 @@ test('console: 쓰기 버튼은 admin일 때만, 쓰기 접속이 아니면 이�
   assert.match(cjs, /이 접속 경로로는 편집할 수 없음/);
   assert.match(cjs, /isAdmin\(\) \? btn\('편집 초안 만들기'/);
   assert.match(cjs, /by = reviewer\(\);\n\s*if \(by\) u\.set\('by', by\)/, '루프백 접속의 GET은 ?by=');
-  for (const lit of ['출하 데모 내용 — 고객 KB 게시 전 자동 발송 금지', '올린 매뉴얼 본문은 변환을 위해 Anthropic API로 전송됩니다. 개인정보·내부 전용 문서는 빼고 올려 주세요.', '지금은 목업 변환 — 외부 전송 없음',
+  for (const lit of ['출하 데모 내용 — 고객 지식베이스 게시 전 자동 발송 금지', '올린 매뉴얼 본문은 변환을 위해 Anthropic API로 전송됩니다. 개인정보·내부 전용 문서는 빼고 올려 주세요.', '지금은 목업 변환 — 외부 전송 없음',
     '저장된 설정을 쓸 수 없어 이 채널은 모든 문의를 사람에게 넘기는 중', '한글에서 PDF로 내보내 주세요', '쪽을 나눠 PDF로 저장해 따로 올려 주세요']) assert.ok(cjs.includes(lit), lit);
 });
 

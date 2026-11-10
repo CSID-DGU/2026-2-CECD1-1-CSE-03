@@ -216,6 +216,16 @@ function getCase(id) {
   };
 }
 
+/** 케이스별 최신 접수 판단의 감정 신호 { sentiment, urgency, threat } — 한 번의 쿼리(SQLite는 max() 행의 다른 열을 같이 돌려준다). 목록 두 곳(/api/cases, /api/crm/cases)이 같이 쓴다. */
+function signalsFor(ids) {
+  const sig = new Map();
+  if (!ids.length) return sig;
+  for (const d of db.all(`SELECT case_id, output, max(rowid) FROM decisions WHERE step='triage' AND case_id IN (${ids.map(() => '?').join(',')}) GROUP BY case_id`, ...ids)) {
+    try { const o = JSON.parse(d.output); sig.set(d.case_id, { sentiment: o.sentiment ?? null, urgency: o.urgency ?? null, threat: o.threat ?? null }); } catch { /* 깨진 출력은 신호 없음 */ }
+  }
+  return sig;
+}
+
 function listCases({ state, channel, q, limit = 50 } = {}) {
   const where = []; const params = [];
   if (state) { where.push(`c.state IN (${state.split(',').map(() => '?').join(',')})`); params.push(...state.split(',')); }
@@ -235,7 +245,8 @@ function listCases({ state, channel, q, limit = 50 } = {}) {
         max(COALESCE((SELECT MAX(created_at) FROM handoffs h WHERE h.case_id=c.id), ''), COALESCE(c.responder_changed_at, '')))) AS reaskedAfterHandoff
     FROM cases c ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY c.updated_at DESC LIMIT ?`, ...params, lim);
-  return rows.map((r) => ({ ...parseCols(r, ['known_facts']), reaskedAfterHandoff: !!r.reaskedAfterHandoff }));
+  const sig = signalsFor(rows.map((r) => r.id));
+  return rows.map((r) => ({ ...parseCols(r, ['known_facts']), reaskedAfterHandoff: !!r.reaskedAfterHandoff, signals: sig.get(r.id) || null }));
 }
 
 /** 채널별 L0→L1 승격 지표 — 발송된 에이전트 초안(무수정 = final_body 없음) + 섀도 초안 평가. 기준은 policy.PROMOTION. */
@@ -318,7 +329,7 @@ events.subscribe(({ name, data }) => {
   setImmediate(() => { try { recloseCourtesy(data.caseId); } catch (e) { console.error('[cases] 감사 인사 재종결 실패', data.caseId?.slice(0, 8), e.message); } });
 });
 
-module.exports = {
+module.exports = { signalsFor,
   HttpError, SEND_CHECK_MS, stripQuotes, sanitizeFacts, sanitizeName, claim, releaseClaim, assertNotPurged, setState, setResponder, hasPending, hasSending, restingState, settle,
   addInbound, getCase, listCases, stats, promotion,
 };

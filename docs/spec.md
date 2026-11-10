@@ -268,6 +268,8 @@ CREATE TABLE IF NOT EXISTS llm_calls (             -- LLM 호출 1건 계량(부
 ```
 `kbHit`: true | "partial" | false.
 
+감정 신호(표시 전용 — 정책 판정에는 쓰지 않는다): `sentiment` 정수 1–5(1 차분 … 5 매우 화남, 고객 말에서 읽히는 만큼만), `urgency` `low|normal|high`, `threat` 불리언(위협·협박·폭언·자해 언급), `customerWants` 고객이 원하는 것(80자 이내, 연락처 마스킹). 모두 필수이며 `normalize`가 범위를 맞춘다(기본 1·`normal`·false·빈 문자열). `GET /api/cases` 각 항목은 그 케이스의 최신 접수 판단에서 뽑은 `signals: {sentiment, urgency, threat}`를 싣고, 접수 판단이 없으면 `null`이다.
+
 **ResponderResult**
 ```json
 { "body": "본문만. 인사·서명 없음. maxLength 이내 | null", "usedFacts": ["kb key"],
