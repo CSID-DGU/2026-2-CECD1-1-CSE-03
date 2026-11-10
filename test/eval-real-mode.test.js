@@ -9,6 +9,7 @@ const os = require('node:os');
 const path = require('node:path');
 const guard = require('../server/guard');
 const mock = require('../server/llm/mock');
+const llm = require('../server/llm');
 const { guardEnv, lockDown, selfCheck, main } = require('../scripts/eval-real');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -116,20 +117,21 @@ test('실행 — --name-col 이름과 --mask-terms 단어가 LLM 요청에 없�
 
   // mock provider를 감싸 요청을 모으고 계량 값을 채운다(실제 provider가 meta에 채우는 자리)
   const calls = [];
-  const orig = mock.json;
-  mock.json = async (req) => { calls.push(req); Object.assign(req.meta || {}, { model: 'stub-model', inputTokens: 10, outputTokens: 5 }); return orig(req); };
+  const orig = { json: mock.json, chat: mock.chat };
+  const spy = (fn) => async (req) => { calls.push(req); Object.assign(req.meta || {}, { model: 'stub-model', inputTokens: 10, outputTokens: 5 }); return fn(req); };
+  mock.json = spy(orig.json); mock.chat = spy(orig.chat); // 답장 Agent 툴 루프 걸음도 한 번씩 센다
   const log = console.log; const lines = [];
   console.log = (...a) => lines.push(a.join(' '));
   process.env.LLM_PROVIDER = 'mock';
   try {
     await main(argv('--name-col=보낸이름', `--mask-terms=${terms}`));
-  } finally { mock.json = orig; console.log = log; }
+  } finally { Object.assign(mock, orig); console.log = log; }
 
   const rowCalls = calls.filter((x) => x.ctx.case.customer_email === 'customer@example.invalid'); // 자기 점검 호출과 구분 — 평가 행만
   assert.ok(rowCalls.length >= 2, '평가 행이 LLM 입력까지 갔다');
   const tri = rowCalls.find((x) => x.agent === 'triage').user;
   assert.ok(tri.includes('[NAME] 드림') && tri.includes('소속은 [TERM]입니다'), tri);
-  for (const x of calls) for (const v of ['박서연', '한빛상회']) assert.ok(!`${x.system}\n${x.user}`.includes(v), `${x.agent}: ${v}`);
+  for (const x of calls) for (const v of ['박서연', '한빛상회']) assert.ok(!llm.promptText(x).includes(v), `${x.agent}: ${v}`);
   assert.match(lines[0], /이름 가림 칸 보낸이름 · 단어 가림 1개/);
 
   const summary = JSON.parse(fs.readFileSync(path.join(OUT, 'summary.json'), 'utf8'));

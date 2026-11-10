@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node --no-warnings=ExperimentalWarning server/index.js",
-    "test": "AUTO_SEND=0 RESPONDER_MODE=single node --no-warnings=ExperimentalWarning --test",
+    "test": "AUTO_SEND=0 node --no-warnings=ExperimentalWarning --test",
     "demo": "node --no-warnings=ExperimentalWarning server/mock/demo.js",
     "smoke:llm": "node --no-warnings=ExperimentalWarning server/mock/demo.js --provider=anthropic --record",
     "sim": "node --no-warnings=ExperimentalWarning server/mock/sim.js",

@@ -102,7 +102,7 @@ ${PROBE.name}드림`; // 이름 뒤에 어미·서명이 띄어쓰기 없이 붙
 
 /**
  * 자기 점검 — 마스킹 함수가 아니라 LLM에 갈 조립된 프롬프트를 본다. 합성 식별자 메일 두 통(초안 경로·넘김 경로, 폼 값 포함)을
- * spy provider(응답은 mock, 네트워크 없음)로 실제 회차에 돌려 네 에이전트의 system·user에 원문 값이 있으면 위반. 빈 배열 = 통과.
+ * spy provider(응답은 mock, 네트워크 없음)로 실제 회차에 돌려 네 에이전트가 보내는 글(답장 Agent 툴 루프의 대화·툴 결과 포함)에 원문 값이 있으면 위반. 빈 배열 = 통과.
  */
 async function selfCheck() {
   const db = require('../server/db');
@@ -111,7 +111,7 @@ async function selfCheck() {
   const cases = require('../server/cases');
   const loop = require('../server/loop');
   const seen = [];
-  llm.use({ name: 'selfcheck', json: async (req) => { seen.push(req); return mock.json(req); } });
+  llm.use({ name: 'selfcheck', json: async (req) => { seen.push(req); return mock.json(req); }, chat: async (req) => { seen.push(req); return mock.chat(req); } });
   db.init(':memory:');
   for (const [i, ask] of ['영수증 발급 방법 알려주세요.', '환불해 주세요.'].entries()) {
     const r = cases.addInbound({
@@ -123,7 +123,7 @@ async function selfCheck() {
   const raw = Object.values(PROBE).flat();
   return [
     ...['briefer', 'responder', 'reviewer', 'triage'].filter((a) => !seen.some((x) => x.agent === a)).map((a) => `${a}: 호출 없음`),
-    ...seen.flatMap((x) => raw.filter((v) => `${x.system}\n${x.user}`.includes(v)).map((v) => `${x.agent}: ${v}`)),
+    ...seen.flatMap((x) => raw.filter((v) => llm.promptText(x).includes(v)).map((v) => `${x.agent}: ${v}`)),
   ];
 }
 

@@ -33,7 +33,7 @@ const step = (caseId, s) => JSON.parse(db.get('SELECT output FROM decisions WHER
 /** 네 에이전트가 provider에 넘긴 실제 요청을 모은다(응답은 mock). */
 function spy() {
   const calls = [];
-  llm.use({ name: 'spy', json: async (req) => { calls.push(req); return mock.json(req); } });
+  llm.use({ name: 'spy', json: async (req) => { calls.push(req); return mock.json(req); }, chat: async (req) => { calls.push(req); return mock.chat(req); } });
   return calls;
 }
 
@@ -160,7 +160,7 @@ test('LLM 입력 마스킹 — 네 에이전트의 실제 요청에 원문 식�
   await run({ from: 'hong@example.com', name: PII.name, subject: '환불', body: `환불해 주세요.\n${PII_TEXT}`, knownFacts: facts });
   assert.deepEqual([...new Set(calls.map((x) => x.agent))].sort(), ['briefer', 'responder', 'reviewer', 'triage']);
   const raw = [...PII.rrn, PII.card, PII.account, PII.passport, PII.order, PII.email, PII.phone, PII.intl, PII.url, PII.address, PII.name];
-  for (const x of calls) for (const v of raw) assert.ok(!`${x.system}\n${x.user}`.includes(v), `${x.agent}: ${v}`);
+  for (const x of calls) for (const v of raw) assert.ok(!llm.promptText(x).includes(v), `${x.agent}: ${v}`);
   const tri = calls.find((x) => x.agent === 'triage').user;
   assert.ok(tri.includes(kb.text), 'KB 본문 그대로');
   assert.ok(tri.includes('https://help.example.com/guide 도 봤어요'), 'KB 링크 그대로');
@@ -172,7 +172,7 @@ test('LLM 입력 마스킹 — 네 에이전트의 실제 요청에 원문 식�
   await run({ from: 'long@example.com', subject: '영수증', body: `영수증 발급 문의드립니다. ${'가나다라마'.repeat(900)} TAILEND` });
   const t2 = calls.find((x) => x.agent === 'triage').user;
   assert.ok(t2.includes('[TRUNCATED]'));
-  for (const x of calls) assert.ok(!x.user.includes('TAILEND'), x.agent);
+  for (const x of calls) assert.ok(!llm.promptText(x).includes('TAILEND'), x.agent);
 });
 
 test('마스킹 오탐 방지 — 날짜·기간·금액·버전·KB 링크·"대로 2번"은 그대로, 전화는 연락처, 회사명 표시명은 이름 가림 안 함', async () => {

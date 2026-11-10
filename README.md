@@ -60,13 +60,13 @@ node --no-warnings=ExperimentalWarning scripts/subject-request.js export <email>
 | 경로 | 무엇 |
 |---|---|
 | `server/` | 서버 전체. 진입점 `index.js`(HTTP · SSE · 라우트), 에이전트 루프 `loop.js`, 1차 거르기 `prefilter.js`, 본문 검사 `guard.js`, 정책 판단 `policy.js`, 지식베이스 로더 `kb.js`, 저장소 `store.js` · `db.js` · `schema.sql`, CRM 투영 `crm.js` · `collections.js` · `cases.js`, 콘솔 `console.js` · `convert.js`(매뉴얼 → 지식베이스), 리포트 `report.js`, 보존 · 파기 `retention.js`, 접속기록 `accesslog.js`, 스위퍼 `sweeper.js`, 알림 `notify.js`, AWS 서명 `aws.js` |
-| `server/agents/` | 네 에이전트 — 접수 `triage.js` · 답장 `responder.js` · 검수 `reviewer.js` · 인계 `briefer.js`, 페르소나 문서 `personas.md`, 답장 Agent 툴 `tools.js` |
+| `server/agents/` | 네 에이전트 — 접수 `triage.js` · 답장 `responder.js` · 검수 `reviewer.js` · 인계 `briefer.js`, 페르소나 문서 `personas.md`, 답장 Agent 툴 `tools/` |
 | `server/llm/` | 모델 어댑터 — `mock.js` · `anthropic.js`, 선택은 `index.js` |
 | `server/mail/` | 발송 어댑터 — `mock.js` · `smtp.js` |
-| `server/mock/` | 합성 문의 세트 `inquiries.js`, `npm run demo` · `npm run sim` 본체 |
+| `server/mock/` | 합성 문의 세트 `inquiries.js`, 주문·결제 조회 툴 시험용 가상 데이터 `business-data.json`, `npm run demo` · `npm run sim` 본체 |
 | `web/` | 백오피스 화면 (바닐라 HTML · CSS · JS, 빌드 없음). `app.js`는 목록 · 칸반 · 상세 · 리포트, `console.js`는 지식·정책 콘솔 |
 | `policy/` | 채널 정책 팩 — `support.json` · `onboarding.json` · `sales.json` |
-| `kb/` | 채널 지식베이스 — `support.md` · `support.en.md` · `onboarding.md` · `sales.md` |
+| `kb/` | 채널 지식베이스 — `support.md` · `support.en.md` · `onboarding.md` · `sales.md`. 가상 회사 "ACME" 기준 예시 내용([`docs/data.md`](docs/data.md)) |
 | `scripts/` | 서버 밖에서 도는 도구. 수신 어댑터 `inbound-imap.js`(IMAP, 미러 모드) · `inbound-ses.js`(SES → S3 → SQS), 메일 왕복 데모 `demo-mail.js`, 실데이터 평가 `eval-real.js`, 감사 내보내기 `audit-export.js`, 정보주체 요청 `subject-request.js`, 검사 도구 CLI `engine.js`(플러그인과 같이 씀), 단일 HTML 프로토타입 빌드 `build-prototype.js` |
 | `scripts/sim/` | 고객 시뮬레이터 — 시나리오 · 초안 · 채점 · 실행(`npm run sim:eval`) |
 | `eval/` | 고정 평가 세트 v1 — 시나리오 120건 `scenarios.v1.jsonl`, 고객 페르소나, 해시 목록 `MANIFEST.json`, 출처 표시 `SOURCES.md` |
@@ -113,6 +113,7 @@ node --no-warnings=ExperimentalWarning scripts/subject-request.js export <email>
 | [`docs/e2e.md`](docs/e2e.md) | 문의 한 통이 들어와서 나가기까지 |
 | [`docs/states.md`](docs/states.md) | 코드가 쓰는 상태 · 코드 값 색인 |
 | [`docs/tools.md`](docs/tools.md) | 답장 Agent 툴 — 목록 · 한 사이클 · 작성 규칙 · 안전 규칙 · 기록 |
+| [`docs/data.md`](docs/data.md) | 데이터 파일 목록 — 파일마다 무엇인지, 가상인지, 파일럿 때 무엇으로 바꾸는지, 지식베이스 빈칸 |
 | [`docs/db.md`](docs/db.md) | 테이블 · 제약 · ER · SQLite→Postgres |
 | [`docs/deployment.md`](docs/deployment.md) | 로컬 vs 배포 · 환경 변수 · Dockerfile · 웹훅 · 단계적 도입 · 파일럿 운영 체크리스트 |
 | [`docs/compliance.md`](docs/compliance.md) | 고객사 약관 · 처리방침에 넣을 AI 응대 고지 문안 템플릿 (법률 자문 아님) |
