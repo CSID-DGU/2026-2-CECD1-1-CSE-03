@@ -40,6 +40,47 @@
         "onboarding": "34396e78",
         "sales": "b3919f70"
       }
+    },
+    "v2": {
+      "file": "eval/scenarios.v2.jsonl",
+      "sha256": "a2e8190f801277c956d4475c038040d1f17ea469ab7e39a8f94b0887c0e81c7a",
+      "count": 128,
+      "composition": {
+        "bundle": {
+          "G": 4,
+          "F": 4,
+          "A": 84,
+          "I": 4,
+          "J": 6,
+          "H": 4,
+          "B": 8,
+          "C": 4,
+          "E": 4,
+          "D": 6
+        },
+        "split": {
+          "test": 102,
+          "dev": 26
+        },
+        "channel": {
+          "onboarding": 30,
+          "sales": 38,
+          "support": 60
+        }
+      },
+      "frozenAt": "2026-11-10T12:15:01.801Z",
+      "personasFile": "eval/personas.v1.json",
+      "personasSha256": "31066a4f3ed6d0262b2b3e71a19c2ebb6d9d213d9690acbd200d20adf310952f",
+      "policySha256": {
+        "support": "73278de8",
+        "onboarding": "7f61602f",
+        "sales": "1cfdb8a8"
+      },
+      "kbSha256": {
+        "support": "9a7bd181",
+        "onboarding": "34396e78",
+        "sales": "b3919f70"
+      }
     }
   }
 }

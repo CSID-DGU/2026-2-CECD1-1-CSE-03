@@ -22,6 +22,17 @@ const handoffTurn = (o = {}) => ({ stepIds: ['s2'], pointer: 's2', triageIntent:
   activities: [], outbound: [], latencyMs: 20, ...o });
 const log = (turns, o = {}) => ({ turns, caseState: 'HANDED_OFF', handoffReason: 'refund_request', ended: 'transfer', ...o });
 
+test('기대 툴: 단계를 처음 물은 턴에서만 보고, 고객이 단계를 적은 턴은 포인터를 보지 않으며, single·시간 초과는 채점에서 뺀다', () => {
+  const sc = scenario({ steps: [
+    { id: 's1', ask: 'a', expect: { intent: 'receipt', outcome: 'auto', reasons: null, tools: ['lookup_billing'] }, doneWhen: { mentions: ['결제 내역'] } },
+    { id: 's2', ask: 'b', expect: { intent: 'receipt', outcome: 'auto', reasons: null }, doneWhen: { mentions: ['결제 내역'] } }] });
+  const r = g.gradeScenario(sc, log([autoTurn({ tools: ['lookup_billing'] }), autoTurn({ stepIds: ['s2'], pointer: 's1', tools: [] }), autoTurn({ stepIds: [], pointer: 's1', tools: [] })]), { autoSend: true });
+  assert.deepEqual(r.turns.map((t) => t.toolMatch), [true, null, null], '두 번째 턴(s2를 물음)과 세 번째 턴(s1은 이미 물음)은 s1 툴을 다시 요구하지 않는다');
+  assert.equal(g.gradeScenario(sc, log([autoTurn({ tools: [] })]), { autoSend: true }).turns[0].toolMatch, false);
+  assert.equal(g.gradeScenario(sc, log([autoTurn({ tools: [] })]), { autoSend: true, responderMode: 'single' }).turns[0].toolMatch, null, 'single은 툴이 없어 해당 없음');
+  assert.equal(g.gradeScenario(sc, log([autoTurn({ tools: [], execute: null, draft: null })]), { autoSend: true }).turns[0].toolMatch, null, '시간 초과(판단 없음)는 뺀다');
+});
+
 test('결과 종류 표: 무시·넘김·자동·승인 대기·가상 담당자 승인', () => {
   assert.equal(ex({ action: 'IGNORE' }).kind, 'ignore');
   assert.deepEqual(ex({ action: 'HANDOFF', reason: 'refund_request' }), { kind: 'handoff', reason: 'refund_request' });

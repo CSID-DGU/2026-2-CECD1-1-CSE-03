@@ -19,6 +19,7 @@ const customer = require('./customer');
 const simLlm = require('./llm');
 
 const ROOT = path.resolve(__dirname, '..', '..');
+const BUSINESS_DATA = path.join(ROOT, 'server', 'mock', 'business-data.json');
 const OUT = path.resolve(ROOT, '..', 'eval-out', 'sim');
 const EVAL = path.join(ROOT, 'eval');
 const ANTHROPIC_ORIGIN = 'https://api.anthropic.com';
@@ -31,6 +32,14 @@ const DROP = ['ANTHROPIC_BASE_URL', 'NOTIFY_WEBHOOK_URL', 'LLM_MOCK_DELAY_MS', '
   'MAIL_MOCK_FAIL', 'MAIL_MOCK_DELAY_MS'];
 
 const sha256 = (b) => crypto.createHash('sha256').update(b).digest('hex');
+const mode = () => (process.env.RESPONDER_MODE === 'single' ? 'single' : 'react');
+// 인증된 등록 고객이 이 실행에서 볼 수 있는 툴(채널별). 잠금 뒤 env(BUSINESS_DATA_FILE 등) 기준
+function exposedTools() {
+  const defs = require('../../server/agents/tools').defs;
+  const who = { sender: 'sim@example.com', sender_auth: 'pass' };
+  return Object.fromEntries(CHANNELS.map((c) => [c, defs({ caseId: 'sim', case: { customer_email: who.sender, known_facts: '{}' }, rawMessage: who,
+    pack: policy.load(c), kb: kbLoader.load(c), triage: {} }).map((d) => d.name).sort()]));
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const refuse = (m) => Object.assign(new Error(`거부: ${m}`), { exitCode: 2 });
 const budgetError = () => Object.assign(new Error('sim_budget'), { code: 'sim_budget' });
@@ -104,6 +113,10 @@ function lockDown(o) {
   Object.assign(process.env, {
     MAIL_PROVIDER: 'mock', MAIL_MOCK_LOG: '0', ENABLE_TEST_INJECT: '1', LLM_PROVIDER: o.provider,
     AUTO_SEND: o.autoSend === false ? '0' : '1', DB_PATH: path.join(o.runDir, 'run.db'),
+    // 등록 고객 메일은 시크릿 웹훅으로 넣는다(발신자 인증 pass를 서버가 믿는 유일한 길). 시크릿은 실행마다 새로 만든다
+    INBOUND_SECRET: crypto.randomBytes(24).toString('hex'),
+    // 업무 데이터(주문·결제·계정·일정)는 저장소의 가상 데이터로 고정한다 — 운영 env가 실제 시스템을 가리켜도 평가가 거기를 읽지 않게
+    BUSINESS_DATA_FILE: BUSINESS_DATA,
   });
   // 안전망: UTC 날짜 단위라 KST 09:00에 0으로 돌아간다. 주 장치는 실행기의 누적 검사다
   if (o.provider === 'anthropic') process.env.LLM_DAILY_TOKEN_BUDGET = String(o.maxTokens);
@@ -179,6 +192,14 @@ const agentTokens = async (base, http) => {
 };
 
 // 한 고객 메일의 판단 결과(채점기가 읽는 모양)
+// 이 메일 회차에서 답장 Agent가 성공적으로 부른 툴 이름(부른 순서, 중복 포함). single 방식이면 빈 배열
+function toolsOf(decisions) {
+  return decisions.filter((x) => x.step === 'respond').flatMap((x) => {
+    let o; try { o = typeof x.output === 'string' ? JSON.parse(x.output) : x.output; } catch { return []; }
+    return Array.isArray(o?.trace) ? o.trace.flatMap((st) => (st.calls || []).filter((c) => c.ok).map((c) => c.tool)) : []; // 실패한 호출은 쓴 것으로 치지 않는다
+  });
+}
+
 function turnOf(d, messageId) {
   const mine = d.decisions.filter((x) => x.message_id === messageId);
   const last = (step) => mine.filter((x) => x.step === step).at(-1) ?? null;
@@ -190,6 +211,7 @@ function turnOf(d, messageId) {
     executedAt: exec?.created_at ?? null,
     errorStep: err && { action: err.action, reason: err.reason, output: err.output },
     draft: d.drafts.filter((x) => x.trigger_message_id === messageId && x.action !== 'ACK').at(-1) ?? null,
+    tools: toolsOf(mine),
     activities: d.activities.filter((x) => x.created_at >= at),
   };
 }
@@ -213,6 +235,7 @@ async function runScenario({ base, scenario: s, persona, trial = 1, runId, ask, 
   const log = { scenario: s.id, trial, threadId, caseId: null, turns: [], caseState: null, handoffReason: null, ended: null, endReason: null, satisfied: null, versions: { policy: [], kb: [], prompt: [] } };
   const end = (ended, reason = null) => { log.ended = ended; log.endReason = reason; };
   const known = new Set(s.steps.map((x) => x.id));
+  const registered = typeof s.customer.email === 'string';
   const transcript = []; const replies = []; const outs = [];
   const agentTotal = async () => { const t = await agentTokens(base, http); return t.input + t.output; };
   const pointerNow = () => grade.pointerAt(s, replies, outs, log.caseState, log.handoffReason);
@@ -228,11 +251,15 @@ async function runScenario({ base, scenario: s, persona, trial = 1, runId, ask, 
     transcript.push({ who: 'customer', body: mail.body, stepIds: mail.stepIds, opening: n === 1 });
     const a0 = await agentTotal();
     const t0 = Date.now();
-    const res = await postJson(http, `${base}/api/test/inbound`, {
-      channel: s.channel, from: `sim+${s.id}-t${trial}@example.com`, name: s.customer.name,
+    const msg = {
+      channel: s.channel, from: registered ? s.customer.email : `sim+${s.id}-t${trial}@example.com`, name: s.customer.name,
       subject: n === 1 ? s.opening.subject : `Re: ${s.opening.subject}`, body: mail.body, threadId, providerMessageId: `${threadId}-${n}`,
       autoSubmitted: !!mail.autoSubmitted, ...(n === 1 && s.formFacts ? { knownFacts: s.formFacts } : {}),
-    });
+    };
+    // 등록 고객: 업무 데이터에 있는 주소로, 발신자 인증 pass로 보낸다(고객 정보 툴이 열린다). 그 밖은 지금처럼 테스트 주입(인증 정보 없음)
+    const res = registered
+      ? await http(`${base}/api/inbound`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-inbound-secret': process.env.INBOUND_SECRET }, body: JSON.stringify({ ...msg, senderAuth: 'pass' }) })
+      : await postJson(http, `${base}/api/test/inbound`, msg);
     if (!res.ok) { end('error', `inbound_${res.status}`); break; }
     const r = await res.json();
     if (r.duplicate) { end('error', 'duplicate'); break; }
@@ -451,7 +478,7 @@ function rowsOf(s, trial, log, r, relabels, judgements) {
     return {
       scenario: s.id, trial, turn: i + 1, stepIds: t.stepIds, pointer: t.pointer, labelSource: g.labelSource, label: g.label, customer: t.customer,
       agent: { triageIntent: t.triageIntent, execute: t.execute, outcome: g.outcome, draftStatus: t.draft?.status ?? null,
-        approvedBy: t.draft?.approved_by ?? null, autoSendFailed: t.autoSendFailed, approveError: t.approveError },
+        approvedBy: t.draft?.approved_by ?? null, autoSendFailed: t.autoSendFailed, approveError: t.approveError, tools: t.tools ?? [], toolMatch: g.toolMatch ?? null },
       relabel: x ? { intent: x.intent, level: x.level } : null, outbound: t.outbound, latencyMs: t.latencyMs,
       tokens: { ...t.tokens, judge: judged[i + 1] || 0, relabel: x?.tokens || 0 },
     };
@@ -462,7 +489,7 @@ function rowsOf(s, trial, log, r, relabels, judgements) {
     critical: r.critical, suspects: r.suspects,
     infra: { turns: r.turns.filter((t) => t.infra).length, autoSendFailed: r.turns.filter((t) => t.outcome.autoSendFailed).length },
     checks: { openingIntent: r.turns[0]?.intentMatch ?? null, openingOutcome: r.turns[0]?.match ?? null,
-      turns: r.turns.map((t) => ({ turn: t.turn, match: t.match, infra: t.infra })), goalMet: r.goalMet, withinTurns: log.turns.length <= s.maxTurns },
+      turns: r.turns.map((t) => ({ turn: t.turn, match: t.match, infra: t.infra, toolMatch: t.toolMatch })), goalMet: r.goalMet, withinTurns: log.turns.length <= s.maxTurns },
     quality: { Q: r.Q, items: r.judgements, ok: r.Qok, judged: r.judgements !== null },
     ended: r.ended, endReason: log.endReason, caseId: log.caseId, satisfied: r.satisfied, turns: log.turns.length, tokens,
   };
@@ -492,6 +519,8 @@ async function runMain(argv) {
   const personas = new Map(set.personas.map((p) => [p.id, p]));
   const picked = set.records.filter((r) => (o.split === 'all' || r.split === o.split) && (!o.subset || (r.tags || []).includes(o.subset)));
   if (!picked.length) { console.error('거부: 고른 시나리오가 없다.'); return 2; }
+  // 등록 고객은 업무 데이터의 실제 주소를 쓰므로 시행끼리 지난 케이스·고객 기록이 섞인다(pass^k의 독립 가정이 깨진다)
+  if (o.repeat > 1 && picked.some((r) => r.customer?.email)) { console.error('거부: 등록 고객 시나리오는 --repeat=1로만 돌린다(시행끼리 같은 주소라 이력이 섞인다). 반복하려면 --subset으로 다른 묶음을 고른다.'); return 2; }
   const lost = picked.find((r) => !personas.has(r.persona));
   if (lost) { console.error(`거부: 없는 페르소나 (레코드 #${set.records.indexOf(lost) + 1})`); return 2; }
   if (o.estimate) {
@@ -560,7 +589,7 @@ async function runMain(argv) {
             log.ended = 'budget'; relabels = []; judgements = null;
           }
         }
-        let r = grade.applyRelabel(grade.gradeScenario(s, log, { autoSend: o.autoSend }), relabels);
+        let r = grade.applyRelabel(grade.gradeScenario(s, log, { autoSend: o.autoSend, responderMode: mode() }), relabels);
         if (judgements) r = grade.applyJudge(r, judgements);
         results.push(r);
         const rows = rowsOf(s, trial, log, r, relabels, judgements);
@@ -588,7 +617,9 @@ async function runMain(argv) {
   const meta = {
     runId, set: { version: set.version, name: set.name, sha256: set.sha256 }, personasSha256: set.personasSha256,
     split: o.split, subset: o.subset, repeat: o.repeat, provider: o.provider, models: o.models, autoSend: o.autoSend,
-    responderMode: process.env.RESPONDER_MODE === 'single' ? 'single' : 'react', // 답장 Agent 방식(single 한 번 호출 · react 툴 루프)
+    responderMode: mode(), // 답장 Agent 방식(single 한 번 호출 · react 툴 루프)
+    tools: exposedTools(), // 채널별로 등록 고객에게 보이는 툴 이름 — 툴이 늘거나 줄면 같은 세트라도 비교 조건이 다르다
+    businessDataSha256: sha256(fs.readFileSync(BUSINESS_DATA)), // 등록 고객 툴이 읽은 가상 업무 데이터
     versions: Object.fromEntries(Object.entries(versions).map(([k, v]) => [k, [...v].sort()])), baseline,
     maxTokens: o.maxTokens, approvedBy: o.approvedBy, startedAt, endedAt: new Date().toISOString(), sim: simHashes(), tokens,
     unsettled, // 기다린 뒤에도 돌던 케이스 수(0이 정상)

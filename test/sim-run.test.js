@@ -140,15 +140,16 @@ test('scripts/sim 소스: loop 모듈·SQL·허용 밖 DB 호출과 require가 �
     for (const m of src.matchAll(/\bdb\.(\w+)\(/g)) assert.ok(['init', 'file', 'get'].includes(m[1]), `${f}: db.${m[1]}`);
     for (const rest of src.split('db.get(').slice(1)) assert.ok(rest.startsWith("'PRAGMA wal_checkpoint(TRUNCATE)')"), f);
     for (const m of src.matchAll(/require\('([^']+)'\)/g)) {
-      assert.match(m[1], /^node:|^\.\/\w+$|^\.\.\/\.\.\/server\/(index|db|policy|kb|guard|llm|llm\/anthropic|llm\/mock|mock\/inquiries)$/, `${f}: ${m[1]}`);
+      // agents/tools는 실행 기록에 노출 툴 이름을 남기려고 defs만 읽는다(툴을 실행하지 않는다)
+      assert.match(m[1], /^node:|^\.\/\w+$|^\.\.\/\.\.\/server\/(index|db|policy|kb|guard|llm|llm\/anthropic|llm\/mock|mock\/inquiries|agents\/tools)$/, `${f}: ${m[1]}`);
     }
   }
   assert.equal(all.match(/['"`]\.\.\/data['"`/]/g)?.length ?? 0, 0, '실데이터 경로 문자열 리터럴이 없다(공용 경로 검사가 이름을 조립한다)');
 });
 
 test('잠금(mock): 루프백 밖 네트워크를 막고 mock 메일·테스트 주입·실행 폴더 DB로 env를 고정한다', async () => {
-  const drop = ['SHADOW_CHANNELS', 'NOTIFY_WEBHOOK_URL', 'INBOUND_SECRET', 'MAIL_MOCK_FAIL', 'MAIL_MOCK_DELAY_MS', 'SMTP_HOST', 'IMAP_HOST'];
-  for (const k of drop) process.env[k] = '1';
+  const drop = ['SHADOW_CHANNELS', 'NOTIFY_WEBHOOK_URL', 'MAIL_MOCK_FAIL', 'MAIL_MOCK_DELAY_MS', 'SMTP_HOST', 'IMAP_HOST'];
+  for (const k of [...drop, 'INBOUND_SECRET', 'BUSINESS_DATA_FILE']) process.env[k] = '1';
   const dir = tmp();
   R.lockDown({ provider: 'mock', autoSend: true, runDir: dir });
   await assert.rejects(async () => fetch('https://example.com/'), /허용 안 된 네트워크/);
@@ -159,6 +160,8 @@ test('잠금(mock): 루프백 밖 네트워크를 막고 mock 메일·테스트 
   assert.equal(process.env.AUTO_SEND, '1');
   assert.equal(process.env.DB_PATH, path.join(dir, 'run.db'));
   for (const k of drop) assert.equal(process.env[k], undefined, k);
+  assert.match(process.env.INBOUND_SECRET, /^[0-9a-f]{48}$/, '수신 시크릿은 운영 값 대신 실행마다 새 값');
+  assert.equal(process.env.BUSINESS_DATA_FILE, path.join(__dirname, '..', 'server', 'mock', 'business-data.json'), '업무 데이터는 저장소 가상 데이터로 고정');
 });
 
 test('견적: 네트워크 없이 턴·단계·답장 수로 토큰 범위만 내고 exit 0', async () => {
@@ -675,4 +678,33 @@ test('출력 폴더는 허용 폴더를 넓히지 않는다: 저장소 형제가
   assert.equal(c.status, 2);
   assert.match(c.stderr, /실데이터/);
   assert.deepEqual(fs.readdirSync(secretDir), ['secret.jsonl']);
+});
+
+test('등록 고객: 시크릿 웹훅·발신자 인증 pass로 들어가 고객 툴이 열리고, 부른 툴과 기대 툴 일치가 턴에 남는다', async () => {
+  const s = rec('sup-reg_login-a-01', {
+    tags: ['registered'], customer: { name: '이수민', email: 'sumin.lee@example.com' },
+    opening: { subject: '로그인', body: '계정이 잠겨서 로그인이 안 돼요. 어떻게 하나요?', stepIds: ['s1'] },
+    steps: [{ id: 's1', ask: 's1 질문', expect: { intent: 'login_issue', outcome: 'approve', reasons: null, tools: ['lookup_account'] }, doneWhen: { mentions: ['비밀번호 재설정'] } }],
+  });
+  const { log, result } = await play(s);
+  assert.equal(log.turns[0].tools[0], 'lookup_account', '등록 고객이라 계정 툴이 열린다');
+  assert.equal(result.turns[0].toolMatch, true);
+  assert.equal(grade.aggregate([result]).toolUse, 1);
+  // 등록되지 않은 같은 문의(테스트 주입, 인증 정보 없음)는 고객 툴이 없다 → 기대 툴 불일치
+  const anon = await play({ ...s, id: 'sup-reg_login-b-01', family: 'sup-reg_login-b', tags: [], customer: { name: '이수민' } });
+  assert.ok(!anon.log.turns[0].tools.includes('lookup_account'));
+  assert.equal(anon.result.turns[0].toolMatch, false);
+  assert.equal(grade.aggregate([result, anon.result]).toolUse, 0.5);
+});
+
+test('등록 고객: --repeat>1은 거부하고(시행끼리 이력이 섞인다), 실행 기록에 채널별 툴 목록과 업무 데이터 해시를 남긴다', async () => {
+  const s = rec('sup-reg_login-a-01', { tags: ['registered'], customer: { name: '이수민', email: 'sumin.lee@example.com' } });
+  const set = fixture([s]);
+  const personasArg = `--personas=${path.join(ROOT, 'eval', 'personas.v1.json')}`;
+  assert.equal((await run([`--file=${set}`, personasArg, '--repeat=2'])).code, 2);
+  const { code, dir } = await run([`--file=${set}`, personasArg]);
+  assert.equal(code, 0);
+  const meta = readJson(path.join(dir, 'meta.json'));
+  assert.ok(meta.tools.support.includes('lookup_account') && meta.tools.onboarding.includes('find_meeting_slots') && !meta.tools.support.includes('find_meeting_slots'));
+  assert.match(meta.businessDataSha256, /^[0-9a-f]{64}$/);
 });

@@ -146,13 +146,15 @@ function convert(ctx) {
 }
 
 // ReAct 흉내(답장 Agent만): 지금까지 부른 툴과 결과를 대화에서 읽어 다음 툴 하나를 고른다.
-// (이전 문의를 가리키면 search_past_cases, 소속 회사를 말하면 get_customer_record, 주문·배송을 물으면 lookup_order, 결제·환불·구독을 물으면 lookup_billing — 노출됐을 때만) →
+// (이전 문의를 가리키면 search_past_cases, 소속 회사를 말하면 get_customer_record, 주문·배송을 물으면 lookup_order, 결제·환불·구독을 물으면 lookup_billing, 계정·로그인·탈퇴를 물으면 lookup_account, 미팅·일정을 물으면 find_meeting_slots — 노출됐을 때만) →
 // read_knowledge_base(필요한 절) → check_draft → 위반이면 걸린 구절을 걷어내 다시 check_draft → 통과하면 submit_draft.
 // 지식베이스에 없어 넘길 때는 search_knowledge_base → report_knowledge_gap → request_handoff.
 const PAST_RE = /지난번|저번|이전에\s*문의|전에\s*(문의|말씀|여쭤)|last time|previously/i;
 const COMPANY_RE = /저희\s*회사|우리\s*회사|저희\s*팀|회사\s*계정|our company|our team/i;
 const ORDER_RE = /주문|배송|택배|order|shipping/i;
 const BILLING_RE = /결제|환불|구독|요금|청구|자동결제|billing|refund|charge|subscription/i;
+const ACCOUNT_RE = /계정|로그인|잠겼|잠김|잠금|탈퇴|권한|account|log ?in|locked/i;
+const MEETING_RE = /미팅|일정|가능한\s*시간|빈\s*시간|meeting|schedule/i;
 function chat({ agent, ctx, messages = [], tools = [] }) {
   if (agent !== 'responder') throw new Error(`mock chat: 알 수 없는 agent ${agent}`);
   const calls = [];
@@ -171,6 +173,8 @@ function chat({ agent, ctx, messages = [], tools = [] }) {
   if (has('get_customer_record') && !called('get_customer_record') && COMPANY_RE.test(body)) return use('get_customer_record', {});
   if (has('lookup_order') && !called('lookup_order') && ORDER_RE.test(body)) return use('lookup_order', {});
   if (has('lookup_billing') && !called('lookup_billing') && BILLING_RE.test(body)) return use('lookup_billing', {});
+  if (has('lookup_account') && !called('lookup_account') && ACCOUNT_RE.test(body)) return use('lookup_account', {});
+  if (has('find_meeting_slots') && !called('find_meeting_slots') && MEETING_RE.test(body)) return use('find_meeting_slots', {});
   const d = respond(ctx);
   if (d.needsHandoff && d.handoffReason === 'out_of_knowledge') {
     const q = ctx.triage?.questionSummary || firstSentence(body);
