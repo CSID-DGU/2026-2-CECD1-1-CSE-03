@@ -59,7 +59,11 @@ const countTokens = async (req) => {
   return p && p.countTokens ? p.countTokens(req) : null;
 };
 
+/** 모델에 가는 글 전부(system + user, 또는 툴 루프 대화의 글·툴 입력·툴 결과) — 마스킹 점검이 본다. */
+const promptText = (req) => [req.system, req.user, ...(req.messages || []).flatMap((m) => (typeof m.content === 'string' ? [m.content]
+  : (m.content || []).map((b) => b.text ?? (typeof b.content === 'string' ? b.content : JSON.stringify(b.content ?? b.input)))))].filter(Boolean).join('\n');
+
 /** ok | degraded(최근 실패 있음) | open(차단 중) */
 const health = () => (Date.now() < breaker.openUntil ? 'open' : (breaker.failures > 0 || breaker.halfOpen ? 'degraded' : 'ok'));
 
-module.exports = { json, chat, countTokens, name, use, health, breaker };
+module.exports = { json, chat, countTokens, name, use, health, breaker, promptText };

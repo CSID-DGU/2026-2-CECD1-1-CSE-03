@@ -270,7 +270,12 @@ async function render([agentName], opts, io) {
   let req = null;
   // 캡처 provider: 요청을 받아 두고 던진다. noRetry라 한 번만 불린다. use가 차단기를 초기화한다
   llm.use({ name: 'engine-capture', json: async (r) => { req = r; throw Object.assign(new Error('captured'), { code: 'captured', noRetry: true }); } });
-  try { await agent.run(ctx); } catch (e) { if (!req) throw bad('render_failed', { code: String(e.code || e.message) }); }
+  // 엔진은 단계마다 프롬프트 하나를 내주고 JSON 하나를 받는다 — 답장 Agent도 한 번 묻는 방식(single)으로 그린다. 툴 루프는 서버 안에서만 돈다
+  const mode = process.env.RESPONDER_MODE;
+  process.env.RESPONDER_MODE = 'single';
+  try { await agent.run(ctx); } catch (e) { if (!req) throw bad('render_failed', { code: String(e.code || e.message) }); } finally {
+    if (mode === undefined) delete process.env.RESPONDER_MODE; else process.env.RESPONDER_MODE = mode;
+  }
   return { code: 0, out: { agent: req.agent, system: req.system, user: req.user, schema: req.schema } };
 }
 

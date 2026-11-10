@@ -246,7 +246,10 @@ describe('발송 확인·동시 승인·재작성·기한 지난 근거·원문 
     assert.equal(outs(r.caseId), 1);
   });
 
-  test('재작성: 첫 작성 guard 실패 → 1회 재작성 통과 → DRAFT / 재작성도 실패 → HANDOFF guard_failed', async () => {
+  test('재작성: 첫 작성 guard 실패 → 1회 재작성 통과 → DRAFT / 재작성도 실패 → HANDOFF guard_failed', async (t) => {
+    // 답장 Agent 출력을 한 번 호출(single)로 흉내 내 loop의 재작성 경로만 본다 — 툴 루프는 제출 전에 스스로 점검해 이 경로에 잘 오지 않는다
+    process.env.RESPONDER_MODE = 'single';
+    t.after(() => { delete process.env.RESPONDER_MODE; });
     llm.use({ name: 'rw1', json: async (r) => (r.agent === 'responder' && !r.ctx.violations
       ? { body: '영수증은 설정에서 받으세요. 환불도 됩니다.', usedFacts: ['receipt'], humanCommitments: [], needsHandoff: false, handoffReason: null } : mock.json(r)) });
     const a = await thread().run('영수증 발급 방법 알려주세요');

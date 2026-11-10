@@ -1066,7 +1066,7 @@ const sortKeys = (v) => (Array.isArray(v) ? v.map(sortKeys) : v && typeof v === 
 function norm(v) {
   const ids = new Map();
   return JSON.stringify(sortKeys(v), hideKeys).replace(UUID_RE, (u) => { if (!ids.has(u)) ids.set(u, `U${ids.size}`); return ids.get(u); })
-    .replace(/"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"/g, '"T"').replace(/"(latency_ms|latencyMs)":\d+/g, '"$1":0');
+    .replace(/"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"/g, '"T"').replace(/"(latency_ms|latencyMs|llmMs|toolMs)":\d+/g, '"$1":0');
 }
 function diff(label, a, b) {
   if (a === b) return null;

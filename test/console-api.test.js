@@ -533,7 +533,7 @@ test('청크 3개 — 첫 청크 사용량이 크면 둘째 전에 failed(job_ca
 test('변환 청크가 연속 3번 실패하면 failed(llm_unavailable), 같은 시간의 일반 회차는 그대로 돈다', async () => {
   const mock = require('../server/llm/mock');
   let convertCalls = 0;
-  llm.use({ name: 'convfail', json: async (req) => { if (req.agent === 'kb_convert') { convertCalls += 1; const e = new Error('upstream'); e.status = 400; throw e; } return mock.json(req); } });
+  llm.use({ name: 'convfail', json: async (req) => { if (req.agent === 'kb_convert') { convertCalls += 1; const e = new Error('upstream'); e.status = 400; throw e; } return mock.json(req); }, chat: mock.chat });
   const st = ok(await upload('support', 'four.md', Buffer.from(blocksMd(4))), 202);
   const inb = cases.addInbound({ channel: 'support', from: 'b19@example.com', subject: '로그인', body: '로그인이 안 됩니다. 비밀번호 재설정 메일도 안 와요.' });
   await loop.runCycle(inb.caseId, inb.messageId);

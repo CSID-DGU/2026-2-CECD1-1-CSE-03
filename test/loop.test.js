@@ -218,7 +218,7 @@ describe('재시도 예약·반환·재오픈·발송 중 회차 경쟁', () => 
   test('재시도 예약된 앞 메시지는 뒤 메시지가 IGNORE로 끝나도 남는다 → 재시도 뒤 승인 대기에 오른다', async () => {
     process.env.LLM_RETRY_SCALE = '0.0001';
     let down = true;
-    llm.use({ name: 'flaky-c2', json: async (r) => { if (down) throw new Error('503'); return mock.json(r); } });
+    llm.use({ name: 'flaky-c2', json: async (r) => { if (down) throw new Error('503'); return mock.json(r); }, chat: async (r) => { if (down) throw new Error('503'); return mock.chat(r); } });
     const t = thread();
     const r1 = await t.run('영수증 재발급 부탁드립니다. 지난달 것입니다.');
     assert.equal(db.get('SELECT retry_message_id FROM loops WHERE case_id=?', r1.caseId).retry_message_id, r1.messageId);
@@ -240,7 +240,7 @@ describe('재시도 예약·반환·재오픈·발송 중 회차 경쟁', () => 
   test('앞 메시지를 맥락에 본 뒤 메시지가 답장으로 끝나면 예약은 지운다', async () => {
     process.env.LLM_RETRY_SCALE = '0.0001';
     let down = true;
-    llm.use({ name: 'flaky-c2b', json: async (r) => { if (down) throw new Error('503'); return mock.json(r); } });
+    llm.use({ name: 'flaky-c2b', json: async (r) => { if (down) throw new Error('503'); return mock.json(r); }, chat: async (r) => { if (down) throw new Error('503'); return mock.chat(r); } });
     const t = thread();
     const r1 = await t.run('영수증 재발급 부탁드립니다.');
     down = false;
@@ -265,7 +265,7 @@ describe('재시도 예약·반환·재오픈·발송 중 회차 경쟁', () => 
   });
 
   test('sweeper 재시도가 도는 중에 recover가 같은 메시지를 다시 돌리지 않는다(반대도)', async () => {
-    llm.use({ name: 'slow-c3', json: async (r) => { await sleep(40); return mock.json(r); } });
+    llm.use({ name: 'slow-c3', json: async (r) => { await sleep(40); return mock.json(r); }, chat: async (r) => { await sleep(40); return mock.chat(r); } });
     for (const order of ['sweeper-first', 'recover-first']) {
       const t = thread();
       const r = t.add('영수증 발급 방법 알려주세요');

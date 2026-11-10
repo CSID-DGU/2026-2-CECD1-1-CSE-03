@@ -32,7 +32,8 @@ const direct = (extra = {}) => common.call({ agent: 'triage', system: 's', user:
 
 test('한 회차의 LLM 호출마다 llm_calls 한 행 — 토큰·모델·지연, 실패 호출도 ok=0', async () => {
   let n = 0;
-  llm.use({ name: 'stub', json: async (req) => { n += 1; Object.assign(req.meta, { model: 'stub-1', inputTokens: 100, outputTokens: 20 }); return mock.json(req); } });
+  const meta = (req) => { n += 1; Object.assign(req.meta, { model: 'stub-1', inputTokens: 100, outputTokens: 20 }); };
+  llm.use({ name: 'stub', json: async (req) => { meta(req); return mock.json(req); }, chat: async (req) => { meta(req); return mock.chat(req); } });
   const r = await run('영수증 발급 방법 알려주세요');
   const rows = db.all('SELECT * FROM llm_calls WHERE case_id=?', r.caseId);
   assert.ok(n >= 3, `호출 ${n}`); assert.equal(rows.length, n);
@@ -41,7 +42,7 @@ test('한 회차의 LLM 호출마다 llm_calls 한 행 — 토큰·모델·지�
     assert.equal(x.input_tokens, 100); assert.equal(x.output_tokens, 20); assert.equal(x.ok, 1); assert.equal(x.error, null);
     assert.ok(Number.isInteger(x.latency_ms) && x.latency_ms >= 0);
   }
-  assert.deepEqual(rows.map((x) => x.agent).slice(0, 3), ['triage', 'responder', 'reviewer']);
+  assert.deepEqual([...new Set(rows.map((x) => x.agent))].slice(0, 3), ['triage', 'responder', 'reviewer']); // 답장 Agent는 툴 루프 걸음마다 한 행
 
   llm.use({ name: 'down', json: async () => { throw Object.assign(new Error('bad request: 고객 본문이 담긴 응답'), { status: 400 }); } });
   await assert.rejects(direct(), (e) => e.status === 400);
