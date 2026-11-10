@@ -15,6 +15,7 @@ const ROWS = [
   ['첫 턴 정확도', 1, (s) => s.accuracy?.firstTurn],
   ['전 턴 정확도', 1, (s) => s.accuracy?.allTurns],
   ['의도 정확도(첫 턴)', 1, (s) => s.intentAccuracy],
+  ['기대 툴 사용률', 1, (s) => s.toolUse],
   ['목표 달성률', 1, (s) => s.goalRate],
   ['평균 턴 수', -1, (s) => s.avgTurns],
   ['턴 지연 p50(ms)', -1, (s) => s.latency?.p50],
@@ -62,6 +63,8 @@ function compare(dirs) {
     if (JSON.stringify(meta.versions?.kb) !== JSON.stringify(b.versions?.kb)) diff.push('지식베이스');
     if (JSON.stringify(meta.versions?.policy) !== JSON.stringify(b.versions?.policy)) diff.push('정책');
     if (meta.autoSend !== b.autoSend) diff.push('자동 발송 설정');
+    if (meta.businessDataSha256 !== b.businessDataSha256) diff.push('업무 데이터');
+    if (JSON.stringify(meta.tools) !== JSON.stringify(b.tools)) diff.push('툴 목록');
     notes.push(`- ${meta.runId}: 기준과 다른 조건 — ${diff.length ? diff.join(', ') : '없음(프롬프트·답장 방식만 다를 수 있음)'}`);
   }
   return `${lines.join('\n')}\n\n▲ 기준(첫 열)보다 나음 · ▼ 나쁨\n\n${notes.join('\n')}\n`;

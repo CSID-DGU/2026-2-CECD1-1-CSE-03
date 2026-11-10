@@ -69,7 +69,7 @@ node --no-warnings=ExperimentalWarning scripts/subject-request.js export <email>
 | `kb/` | 채널 지식베이스 — `support.md` · `support.en.md` · `onboarding.md` · `sales.md`. 가상 회사 "ACME" 기준 예시 내용([`docs/data.md`](docs/data.md)) |
 | `scripts/` | 서버 밖에서 도는 도구. 수신 어댑터 `inbound-imap.js`(IMAP, 미러 모드) · `inbound-ses.js`(SES → S3 → SQS), 메일 왕복 데모 `demo-mail.js`, 실데이터 평가 `eval-real.js`, 감사 내보내기 `audit-export.js`, 정보주체 요청 `subject-request.js`, 검사 도구 CLI `engine.js`(플러그인과 같이 씀), 단일 HTML 프로토타입 빌드 `build-prototype.js` |
 | `scripts/sim/` | 고객 시뮬레이터 — 시나리오 · 초안 · 채점 · 실행(`npm run sim:eval`) |
-| `eval/` | 고정 평가 세트 v1 — 시나리오 120건 `scenarios.v1.jsonl`, 고객 페르소나, 해시 목록 `MANIFEST.json`, 출처 표시 `SOURCES.md` |
+| `eval/` | 고정 평가 세트 — v1 시나리오 120건 `scenarios.v1.jsonl`, v2 = v1 + 등록 고객 8건 `scenarios.v2.jsonl`, 고객 페르소나, 해시 목록 `MANIFEST.json`, 출처 표시 `SOURCES.md` |
 | `infra/` | AWS 운영 스택 CloudFormation 템플릿 `cs-agent.cfn.json` (작성 · 테스트만, 배포 안 함) |
 | `test/` | `node:test` — 모듈별 한 파일. 인프라 템플릿 불변식, AWS 서명, SES 수신도 여기서 검사 |
 | `docs/` | 설계 문서 (아래 표) |

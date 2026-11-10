@@ -266,3 +266,73 @@ test('결제 조회 툴: 목 데이터로 이 고객의 구독·결제·환불 �
     assert.equal(lastExec(refund.caseId).action, 'HANDOFF');
   } finally { delete process.env.BUSINESS_DATA_FILE; }
 });
+
+test('계정 상태 툴: 고객 본인·인증 pass일 때만, 잠김·탈퇴 진행·SSO를 돌려주고 날짜·연락처는 없고, 다른 고객 것은 안 나온다', async () => {
+  const path = require('node:path');
+  const tools = require('../server/agents/tools');
+  const pack = require('../server/policy').load('support'); const kb = require('../server/kb').load('support');
+  const ctx = (email, auth = 'pass') => ({ caseId: 'x', case: { customer_email: email, known_facts: '{}' }, rawMessage: { sender: email, sender_auth: auth, body_clean: '계정이 잠겼어요' }, pack, kb, triage: { intent: 'login_issue' } });
+  const has = (c) => tools.defs(c).some((d) => d.name === 'lookup_account');
+  assert.ok(!has(ctx('sumin.lee@example.com')), 'BUSINESS_DATA_FILE 없으면 숨김');
+  process.env.BUSINESS_DATA_FILE = path.join(__dirname, '..', 'server', 'mock', 'business-data.json');
+  try {
+    assert.ok(!has(ctx('sumin.lee@example.com', null)), '인증 없으면 숨김');
+    const locked = JSON.parse(tools.runner(ctx('sumin.lee@example.com')).run('lookup_account', {}).content);
+    assert.deepEqual(locked.login, { locked: true, reason: 'failed_attempts' });
+    const del = JSON.parse(tools.runner(ctx('dahye.song@example.com')).run('lookup_account', {}).content);
+    assert.equal(del.status, 'pending_deletion'); assert.deepEqual(del.deletion, { requested: true, stage: 'processing' });
+    assert.equal(JSON.parse(tools.runner(ctx('taeho.yoon@example.com')).run('lookup_account', {}).content).sso, true);
+    assert.ok(!/\d{4}-\d{2}-\d{2}|@/.test(JSON.stringify(del)), '날짜·주소 없음');
+    assert.equal(JSON.parse(tools.runner(ctx('nobody@example.com')).run('lookup_account', {}).content).found, false);
+    // 실제 시스템의 자유 문구 이유·단계는 정해진 값으로만 나간다(날짜가 실려 나가지 않게)
+    const os = require('node:os'); const fs = require('node:fs');
+    const free = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'acct-')), 'a.json');
+    fs.writeFileSync(free, JSON.stringify({ accounts: [{ email: 'x@example.com', status: 'active', login: { locked: true, reason: '2026-12-01까지 잠김' }, twoFactor: 'yes', deletion: { stage: '12/01 삭제 예정' } }] }));
+    process.env.BUSINESS_DATA_FILE = free;
+    const f = JSON.parse(tools.runner(ctx('x@example.com')).run('lookup_account', {}).content);
+    assert.deepEqual([f.login.reason, f.deletion.stage, f.twoFactor], ['unknown', 'unknown', false]);
+    process.env.BUSINESS_DATA_FILE = path.join(__dirname, '..', 'server', 'mock', 'business-data.json');
+
+    // 회차 전체: 잠긴 계정 고객 → 계정 조회 → 지식베이스 → 검사 → 제출
+    const r = cases.addInbound({ channel: 'support', name: '이수민', from: 'sumin.lee@example.com', subject: '로그인', body: '계정이 잠겨서 로그인이 안 돼요. 어떻게 하나요?', threadId: 'ra-1', providerMessageId: 'ram-1', senderAuth: 'pass' });
+    await loop.runCycle(r.caseId, r.messageId);
+    assert.deepEqual(out(r.caseId, 'respond')[0].trace.flatMap((s) => s.calls.map((c) => c.tool)), ['lookup_account', 'read_knowledge_base', 'check_draft', 'submit_draft']);
+  } finally { delete process.env.BUSINESS_DATA_FILE; }
+});
+
+test('담당자 빈 시간 툴: 날짜를 허용하는 채널에서만 보이고, 요일·시간 틀에서 최소 간격·찬 시간을 빼고 가까운 후보 3개를 한국 시간으로 낸다', () => {
+  const path = require('node:path');
+  const tools = require('../server/agents/tools');
+  const meeting = require('../server/agents/tools/meeting');
+  const policy = require('../server/policy');
+  const ctx = (channel) => ({ caseId: 'x', case: { customer_email: 'a@example.com', known_facts: '{}' }, rawMessage: { sender: 'a@example.com', sender_auth: null }, pack: policy.load(channel), kb: require('../server/kb').load(channel), triage: { intent: 'meeting_request' } });
+  const has = (c) => tools.defs(c).some((d) => d.name === 'find_meeting_slots');
+  assert.ok(!has(ctx('onboarding')), 'BUSINESS_DATA_FILE 없으면 숨김');
+  process.env.BUSINESS_DATA_FILE = path.join(__dirname, '..', 'server', 'mock', 'business-data.json');
+  try {
+    assert.ok(has(ctx('onboarding')), '온보딩(allowDates)은 고객 인증 없이도 보인다 — 고객 정보가 없다');
+    assert.ok(!has(ctx('support')) && !has(ctx('sales')), '날짜를 막는 채널에는 없다');
+    // 2026-11-10(화) 10:00 KST. 틀: 화·목 10/14/16시, 최소 24시간 뒤 → 오늘 화요일은 빠지고 목요일부터
+    const now = Date.parse('2026-11-10T01:00:00Z');
+    assert.deepEqual(meeting.slots(now).slots, [
+      { date: '2026-11-12', weekday: '목', time: '10:00' }, { date: '2026-11-12', weekday: '목', time: '14:00' }, { date: '2026-11-12', weekday: '목', time: '16:00' }]);
+    // 목요일 밤 → 다음 화요일
+    const at = (t) => meeting.slots(t).slots.map((s) => `${s.date} ${s.time}`);
+    assert.deepEqual(at(Date.parse('2026-11-12T13:00:00Z')), ['2026-11-17 10:00', '2026-11-17 14:00', '2026-11-17 16:00']);
+    // 이미 찬 시간은 뺀다
+    const os = require('node:os'); const fs = require('node:fs');
+    const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'meet-')), 'b.json');
+    fs.writeFileSync(tmp, JSON.stringify({ meeting: { weekdays: [2, 4], times: ['10:00', '14:00'], minLeadHours: 24, busy: ['2026-11-17T10:00'] } }));
+    process.env.BUSINESS_DATA_FILE = tmp;
+    assert.deepEqual(at(Date.parse('2026-11-12T13:00:00Z')), ['2026-11-17 14:00', '2026-11-19 10:00', '2026-11-19 14:00']);
+    process.env.BUSINESS_DATA_FILE = path.join(__dirname, '..', 'server', 'mock', 'business-data.json');
+    // 각 툴 설명도 작성 규칙(3문장 이상, 강조 표현 없음, strict)을 지킨다
+    const all = [...tools.defs({ ...ctx('onboarding'), rawMessage: { sender: 'a@example.com', sender_auth: 'pass' } }), ...tools.defs({ ...ctx('support'), rawMessage: { sender: 'a@example.com', sender_auth: 'pass' } })];
+    for (const name of ['lookup_account', 'find_meeting_slots']) {
+      const d = all.find((x) => x.name === name);
+      assert.ok(d, name);
+      assert.ok(d.description.split(/(?<=다\.|\))\s|(?<=[.])\s/).length >= 3 && !/반드시|MUST|ALWAYS|NEVER/.test(d.description), name);
+      assert.equal(d.strict, true);
+    }
+  } finally { delete process.env.BUSINESS_DATA_FILE; }
+});

@@ -1,5 +1,5 @@
 {
-  "_note": "가상 데이터 — 고객사 주문·결제 시스템이 정해지기 전 툴 시험용. 이름·주소·번호 모두 지어낸 값이고, 이메일은 server/mock/inquiries.js의 합성 고객과 맞춘다.",
+  "_note": "가상 데이터 — 고객사 주문·결제·계정·일정 시스템이 정해지기 전 툴 시험용. 이름·주소·번호 모두 지어낸 값이고, 이메일은 server/mock/inquiries.js의 합성 고객과 eval/scenarios.v2.jsonl의 등록 고객에 맞춘다.",
   "billing": [
     {
       "email": "minjun.choi@example.com",
@@ -33,6 +33,13 @@
       ]
     },
     {
+      "email": "jisoo.kang@example.com",
+      "subscription": { "plan": "베이직 월간", "status": "active", "billingCycle": "monthly", "nextBillingAt": "2026-11-25T00:00:00Z", "autoRenew": true },
+      "payments": [
+        { "paymentId": "PAY-20261025-3140", "paidAt": "2026-10-25T00:00:00Z", "status": "paid", "method": "card", "amount": 9900, "refund": null }
+      ]
+    },
+    {
       "email": "alex.kim@example.com",
       "subscription": { "plan": "Pro monthly", "status": "past_due", "billingCycle": "monthly", "nextBillingAt": "2026-11-10T00:00:00Z", "autoRenew": true },
       "payments": [
@@ -40,6 +47,16 @@
       ]
     }
   ],
+  "accounts": [
+    { "email": "seoyeon.park@example.com", "status": "active", "role": "owner", "login": { "locked": false, "reason": null }, "twoFactor": true, "sso": false, "deletion": null },
+    { "email": "sumin.lee@example.com", "status": "active", "role": "member", "login": { "locked": true, "reason": "failed_attempts" }, "twoFactor": false, "sso": false, "deletion": null },
+    { "email": "taeho.yoon@example.com", "status": "active", "role": "admin", "login": { "locked": false, "reason": null }, "twoFactor": false, "sso": true, "deletion": null },
+    { "email": "dahye.song@example.com", "status": "pending_deletion", "role": "owner", "login": { "locked": false, "reason": null }, "twoFactor": false, "sso": false, "deletion": { "stage": "processing" } },
+    { "email": "hayul.kwon@example.com", "status": "active", "role": "owner", "login": { "locked": false, "reason": null }, "twoFactor": true, "sso": false, "deletion": null },
+    { "email": "jisoo.kang@example.com", "status": "active", "role": "owner", "login": { "locked": false, "reason": null }, "twoFactor": false, "sso": false, "deletion": null },
+    { "email": "nari.cho@example.com", "status": "active", "role": "admin", "login": { "locked": false, "reason": null }, "twoFactor": true, "sso": false, "deletion": null }
+  ],
+  "meeting": { "timezone": "Asia/Seoul", "weekdays": [2, 4], "times": ["10:00", "14:00", "16:00"], "minLeadHours": 24, "busy": [] },
   "orders": [
     {
       "orderNumber": "ORD-20261102-3301", "email": "jiwoo.han@example.com", "status": "배송 중", "orderedAt": "2026-11-02T03:00:00Z", "shippedAt": "2026-11-03T08:00:00Z", "deliveredAt": null,

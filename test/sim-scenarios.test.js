@@ -361,3 +361,36 @@ try { S.readChecked(process.argv[1]); console.log('read'); } catch (e) { console
   const r = spawnSync(process.execPath, ['-e', code, fifo], { encoding: 'utf8', timeout: 5000, env: { ...process.env, TMPDIR: os.tmpdir() } });
   assert.equal(r.stdout.trim(), 'path_refused', r.stderr || `signal ${r.signal}`);
 });
+
+test('등록 고객: customer.email은 @example.com이고 registered 태그와 짝이며, expect.tools는 실제 툴 이름만 받는다', () => {
+  const reg = (over = {}) => rec(1, { tags: ['registered'], customer: { name: '가상고객', email: 'seoyeon.park@example.com' }, ...over });
+  assert.deepEqual(S.validate(reg(), ctx), []);
+  assert.ok(S.validate(reg({ customer: { name: '가상고객', email: 'a@real-company.co.kr' } }), ctx).some((e) => e.includes('@example.com')));
+  assert.ok(S.validate(reg({ tags: [] }), ctx).some((e) => e.includes('registered')), '주소만 있고 태그 없음');
+  assert.ok(S.validate(rec(1, { tags: ['registered'] }), ctx).some((e) => e.includes('registered')), '태그만 있고 주소 없음');
+  const withTools = (tools) => rec(1, { steps: [{ id: 's1', ask: '영수증', expect: { intent: 'receipt', outcome: 'auto', reasons: null, tools }, doneWhen: { mentions: ['결제 내역'] } }] });
+  assert.deepEqual(S.validate(withTools(['lookup_billing']), ctx), []);
+  assert.ok(S.validate(withTools(['lookup_bill']), ctx).some((e) => e.includes('expect.tools')));
+  // 이름 목록이 server/agents/tools/의 실제 툴과 같다(툴을 더하면 목록도 더한다)
+  const dir = path.join(__dirname, '..', 'server', 'agents', 'tools');
+  const names = fs.readdirSync(dir).flatMap((f) => [...fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/^\s*name: '([a-z_]+)'/gm)].map((m) => m[1]));
+  assert.deepEqual([...S.TOOL_NAMES].sort(), [...new Set(names)].sort());
+});
+
+test('평가 세트 v2: v1 120건을 그대로 담고 등록 고객 시나리오를 더한다', () => {
+  const read = (v) => fs.readFileSync(path.join(__dirname, '..', 'eval', `scenarios.${v}.jsonl`), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const v1 = read('v1'); const v2 = read('v2');
+  const byId = new Map(v2.map((r) => [r.id, r]));
+  for (const r of v1) assert.deepEqual(byId.get(r.id), r, r.id);
+  const added = v2.filter((r) => !v1.some((x) => x.id === r.id));
+  assert.ok(added.length >= 8);
+  for (const r of added) {
+    assert.ok(r.tags.includes('registered') && r.customer.email, r.id);
+    assert.ok(r.steps.every((s) => s.expect.tools?.length), `${r.id} 기대 툴`);
+  }
+  // 등록 고객 주소는 가상 업무 데이터에 있다(일정 툴만 쓰는 시나리오는 주문 고객 주소)
+  const biz = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'server', 'mock', 'business-data.json'), 'utf8'));
+  const known = new Set([...biz.accounts, ...biz.billing, ...biz.orders].map((x) => x.email));
+  for (const r of added) assert.ok(known.has(r.customer.email), `${r.id} ${r.customer.email}`);
+  assert.equal(new Set(added.map((r) => r.customer.email)).size, added.length, '시나리오끼리 주소를 나눠 쓰지 않는다(지난 케이스가 섞이지 않게)');
+});

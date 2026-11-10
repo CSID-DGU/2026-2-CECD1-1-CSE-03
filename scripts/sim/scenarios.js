@@ -26,11 +26,14 @@ const LICENSES = {
   'US-gov-public': ['taxonomy-only'],
   'data.go.kr-unrestricted': ['taxonomy-only'],
 };
-const TAGS = ['multi_turn', 'injection', 'legal_threat', 'refund_dispute', 'repeat', 'auto_reply', 'ack', 'hard_negative', 'english', 'goal_chain', 'smoke'];
+const TAGS = ['multi_turn', 'injection', 'legal_threat', 'refund_dispute', 'repeat', 'auto_reply', 'ack', 'hard_negative', 'english', 'goal_chain', 'smoke', 'registered'];
 
 const CHANNELS = ['support', 'onboarding', 'sales'];
 const ABBR = { support: 'sup', onboarding: 'onb', sales: 'sal' };
 const OUTCOMES = ['auto', 'approve', 'handoff', 'ignore'];
+// expect.tools에 쓸 수 있는 이름(server/agents/tools/의 툴). 툴을 더하면 여기도 더한다 — test/sim-scenarios.test.js가 맞춰 본다
+const TOOL_NAMES = ['search_knowledge_base', 'read_knowledge_base', 'report_knowledge_gap', 'search_past_cases', 'get_customer_record', 'lookup_order',
+  'lookup_billing', 'lookup_account', 'find_meeting_slots', 'read_official_page', 'check_draft', 'submit_draft', 'request_handoff'];
 const ORIGINS = ['seed', 'adapted', 'handwritten'];
 const ID_RE = /^(sup|onb|sal)-[a-z0-9_]+-[a-z]-\d{2}$/;
 const FAMILY_RE = /^(sup|onb|sal)-[a-z0-9_]+-[a-z]$/;
@@ -142,6 +145,9 @@ function validate(rec, { packs = {}, personas = [] } = {}) {
   if (!Array.isArray(rec.tags) || rec.tags.some((t) => !TAGS.includes(t))) bad('허용 목록 밖 태그');
   if (!personaIds(personas).has(rec.persona)) bad(`없는 페르소나: ${rec.persona}`);
   if (!isObj(rec.customer) || !isStr(rec.customer.name)) bad('customer.name 없음');
+  // 등록 고객: 가상 업무 데이터(server/mock/business-data.json)에 있는 주소. 가상 도메인만 허용하고 registered 태그와 짝을 맞춘다
+  else if (rec.customer.email !== undefined && !(isStr(rec.customer.email) && /^[a-z0-9.+-]+@example\.com$/.test(rec.customer.email))) bad('customer.email은 @example.com 주소');
+  else if (Array.isArray(rec.tags) && rec.tags.includes('registered') !== (rec.customer.email !== undefined)) bad('registered 태그와 customer.email은 함께 둔다');
   const op = rec.opening;
   if (!isObj(op) || !isStr(op.subject) || !isStr(op.body) || !Array.isArray(op.stepIds) || !op.stepIds.length) bad('opening은 {subject, body, stepIds}');
   // english 태그가 없으면 첫 메일 본문에 한글이 있어야 한다
@@ -177,6 +183,7 @@ function validate(rec, { packs = {}, personas = [] } = {}) {
       for (const i of list) if (typeof i !== 'string' || (intents && !intents.includes(i))) bad(`팩에 없는 intent: ${s.id} ${i}`);
       if (ex.outcome === 'handoff') checkReasons(ex.reasons, `${s.id}`);
       else if (ex.reasons != null) checkReasons(ex.reasons, `${s.id}`);
+      if (ex.tools != null && (!Array.isArray(ex.tools) || !ex.tools.length || ex.tools.some((t) => !TOOL_NAMES.includes(t)))) bad(`expect.tools는 답장 Agent 툴 이름 배열: ${s.id}`);
       const d = s.doneWhen;
       if (!isObj(d) || [d.mentions != null, d.handoff === true, d.ignore === true].filter(Boolean).length !== 1) bad(`doneWhen은 mentions·handoff·ignore 중 하나: ${s.id}`);
       else if (d.mentions != null && (!Array.isArray(d.mentions) || !d.mentions.length)) bad(`mentions는 비지 않은 배열: ${s.id}`);
@@ -384,6 +391,6 @@ function cli(argv) {
   return 2;
 }
 
-module.exports = { BANNED, LICENSES, TAGS, TMP, validate, errorCode, similar, dedup, load, freeze, realKey, isUnder, checkInput, checkOut, readChecked };
+module.exports = { BANNED, LICENSES, TAGS, TOOL_NAMES, TMP, validate, errorCode, similar, dedup, load, freeze, realKey, isUnder, checkInput, checkOut, readChecked };
 
 if (require.main === module) process.exitCode = cli(process.argv.slice(2));

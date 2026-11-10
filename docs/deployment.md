@@ -34,7 +34,7 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `ANTHROPIC_BASE_URL` (`https://api.anthropic.com/v1/messages`) | `server/llm/anthropic.js` | Messages 엔드포인트. `fetch` 직접 호출, `anthropic-version: 2026-10-21`, JSON 은 `output_config.format: json_schema` |
 | `LLM_TIMEOUT_MS` (30000) | `server/llm/anthropic.js` | LLM 호출 하나의 제한 시간(`AbortSignal.timeout`) |
 | `RESPONDER_MODE` (react) | `server/agents/responder.js` | 답장 Agent 방식. 기본 `react`는 툴(지식베이스 찾기·읽기, 고객 이력, 주문·결제 조회, 초안 검사·제출, 사람에게 넘김)을 모델이 골라 부른다(목록은 `docs/tools.md`). `single`이면 한 번 묻고 JSON을 받는다 |
-| `BUSINESS_DATA_FILE` (없음) | `server/agents/tools/business.js` | 주문·결제 조회 툴의 원본 JSON 파일(시험용 목 데이터 `server/mock/business-data.json`). 비우면 두 툴을 숨긴다. 고객사 시스템이 정해지면 `load()`를 실제 연동으로 바꾼다 |
+| `BUSINESS_DATA_FILE` (없음) | `server/agents/tools/business.js` | 주문·결제·계정 조회 툴과 담당자 빈 시간 툴의 원본 JSON 파일(시험용 목 데이터 `server/mock/business-data.json`). 비우면 네 툴을 숨긴다. 고객사 시스템이 정해지면 `load()`를 실제 연동으로 바꾼다. 평가 실행기(`sim:eval`)는 이 값과 상관없이 목 데이터로 고정한다 |
 | `OFFICIAL_SITE_DOMAINS` (없음) | `server/agents/tools/web.js` | 공식 사이트 읽기 툴이 열 수 있는 도메인(쉼표 목록, 하위 도메인 포함, 예 `help.example.com,status.example.com`). 비우면 툴을 숨긴다. https와 이 도메인만 열리고 내부망 주소·이동 경로는 막는다 |
 | `REACT_MAX_STEPS` (6) | `server/agents/responder.js` | react 한 사이클의 LLM 걸음 상한. 끝내는 툴 없이 닿으면 사람에게(llm_error) |
 | `LLM_RETRY_SCALE` (1) | `server/loop.js` `server/llm/index.js` | 장애 재시도 간격(2·5·10·30분)과 차단기 열림 시간(60초)의 배수. 테스트에서 줄인다 |

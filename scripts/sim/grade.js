@@ -122,7 +122,7 @@ function goalMet(scenario, done, reached) {
   return steps.every((s) => done[s.id]);
 }
 
-function gradeScenario(scenario, log, { autoSend } = {}) {
+function gradeScenario(scenario, log, { autoSend, responderMode } = {}) {
   const turns = [];
   const critical = [];
   const autoOnL1 = [];
@@ -140,7 +140,13 @@ function gradeScenario(scenario, log, { autoSend } = {}) {
     for (const o of asList(t.outbound)) if (o.sentBy === 'agent') replies.push({ turn, body: o.body });
 
     const { label, labelSource } = labelFor(scenario, t, { autoSend: autoSendOn });
-    const row = { turn, label, labelSource, outcome: out, infra: out.kind === 'infra', match: null, intentMatch: null };
+    const row = { turn, label, labelSource, outcome: out, infra: out.kind === 'infra', match: null, intentMatch: null, toolMatch: null, tools: asList(t.tools) };
+    // 기대 툴: 이 턴에 처음 물은 단계의 expect.tools를 모두 불렀는가. 통과(D)에는 넣지 않고 따로 센다.
+    // 단계가 이미 앞 턴에서 물어졌으면 다시 요구하지 않는다(답이 대화에 있다). 고객이 단계를 적지 않은 턴만 포인터를 본다.
+    // null(채점에서 뺌): 기대 툴 없음, infra·시간 초과 턴, single 방식(툴이 없다)
+    const asked = asList(t.stepIds).length ? asList(t.stepIds) : [t.pointer].filter(Boolean);
+    const wantTools = [...new Set(scenario.steps.filter((s) => asked.includes(s.id) && firstAsked[s.id] === turn).flatMap((s) => asList(s.expect?.tools)))];
+    if (wantTools.length && !row.infra && out.kind !== 'pending' && responderMode !== 'single') row.toolMatch = wantTools.every((n) => row.tools.includes(n));
     if (!row.infra) {
       const lk = keyOf(label);
       const ok = !label || (keyOf(out) === lk && (label.reasons == null || label.reasons.includes(out.reason)));
@@ -277,6 +283,7 @@ function aggregate(results, { workload, usage, prices, meta, compareMeta } = {})
       handoffReason: ratio(hCount.filter((t) => t.match).length, hCount.length),
     },
     confusion, intentAccuracy: ratio(intentRows.filter((t) => t.intentMatch).length, intentRows.length),
+    toolUse: ratio(live.filter((t) => t.toolMatch === true).length, live.filter((t) => t.toolMatch !== null).length),
     goalRate: ratio(results.filter((r) => r.goalMet).length, results.length),
     avgTurns: mean(results.map((r) => r.turns.length)),
     latency: { p50: pct(results.flatMap((r) => r.latencies), 50), p95: pct(results.flatMap((r) => r.latencies), 95),
@@ -313,7 +320,7 @@ function toMarkdown(s) {
   for (const c of s.suspects.list) L.push(`  - ${c.scenario} 턴 ${c.turn} ${c.intent} (${c.level})`);
   L.push('', '## 정확도', '',
     `- 첫 턴 ${f(s.accuracy.firstTurn)}, 전 턴 ${f(s.accuracy.allTurns)}, 넘김 사유 ${f(s.accuracy.handoffReason)}`,
-    `- intent(첫 턴): ${f(s.intentAccuracy)}, 목표 달성률 ${f(s.goalRate)}, 평균 턴 수 ${f(s.avgTurns, 2)}`,
+    `- intent(첫 턴): ${f(s.intentAccuracy)}, 목표 달성률 ${f(s.goalRate)}, 평균 턴 수 ${f(s.avgTurns, 2)}, 기대 툴 사용률 ${f(s.toolUse)}`,
     '', '## 혼동표 (기대 행, 실제 열)', '', `| 기대 | ${ACTUALS.join(' | ')} |`, `|${' --- |'.repeat(ACTUALS.length + 1)}`);
   for (const [row, cols] of Object.entries(s.confusion)) L.push(`| ${row} | ${ACTUALS.map((c) => cols[c] ?? 0).join(' | ')} |`);
   L.push('', '## 품질', '', `- 항목 평균: ${SCORE_KEYS.map((k) => `${k} ${f(s.quality.items[k], 2)}`).join(', ')}`, `- Qok 비율: ${f(s.quality.qokRate)}`);
