@@ -14,6 +14,7 @@ const db = require('../../server/db');
 const policy = require('../../server/policy');
 const kbLoader = require('../../server/kb');
 const grade = require('./grade');
+const perf = require('./perf');
 const scenarios = require('./scenarios');
 const customer = require('./customer');
 const simLlm = require('./llm');
@@ -180,7 +181,7 @@ async function caseDetail(base, caseId, http = (u, i) => fetch(u, i)) {
     case: pick(d.case, ['state', 'responder']),
     messages: d.messages.map((m) => pick(m, ['id', 'direction', 'sent_by', 'body', 'occurred_at', 'provider_message_id'])),
     drafts: d.drafts.map((x) => pick(x, ['id', 'action', 'status', 'approved_by', 'trigger_message_id'])),
-    decisions: d.decisions.map((x) => pick(x, ['message_id', 'step', 'action', 'reason', 'output', 'created_at', 'prompt_version', 'kb_version', 'policy_version'])),
+    decisions: d.decisions.map((x) => pick(x, ['message_id', 'step', 'agent', 'action', 'reason', 'output', 'latency_ms', 'created_at', 'prompt_version', 'kb_version', 'policy_version'])),
     handoffs: d.handoffs.map((h) => pick(h, ['reason'])),
     activities: d.activities.map((x) => pick(x, ['type', 'created_at'])),
   };
@@ -190,6 +191,8 @@ const agentTokens = async (base, http) => {
   const t = (await getJson(http, `${base}/api/report`)).llm.total;
   return { input: t.inputTokens, output: t.outputTokens };
 };
+// 에이전트별 누적(접수·답장) — 턴 앞뒤 차이가 그 회차 몫
+const agentUsage = async (base, http) => perf.usageSnapshot((await getJson(http, `${base}/api/report`)).llm);
 
 // 한 고객 메일의 판단 결과(채점기가 읽는 모양)
 // 이 메일 회차에서 답장 Agent가 성공적으로 부른 툴 이름(부른 순서, 중복 포함). single 방식이면 빈 배열
@@ -213,6 +216,7 @@ function turnOf(d, messageId) {
     draft: d.drafts.filter((x) => x.trigger_message_id === messageId && x.action !== 'ACK').at(-1) ?? null,
     tools: toolsOf(mine),
     activities: d.activities.filter((x) => x.created_at >= at),
+    timing: perf.timingOf(mine, at || null),
   };
 }
 
@@ -250,6 +254,7 @@ async function runScenario({ base, scenario: s, persona, trial = 1, runId, ask, 
     const pointer = pointerNow();
     transcript.push({ who: 'customer', body: mail.body, stepIds: mail.stepIds, opening: n === 1 });
     const a0 = await agentTotal();
+    const u0 = await agentUsage(base, http);
     const t0 = Date.now();
     const msg = {
       channel: s.channel, from: registered ? s.customer.email : `sim+${s.id}-t${trial}@example.com`, name: s.customer.name,
@@ -301,6 +306,7 @@ async function runScenario({ base, scenario: s, persona, trial = 1, runId, ask, 
     log.caseState = d.case.state;
     log.handoffReason = d.handoffs.at(-1)?.reason ?? null;
     turn.tokens.agent = (await agentTotal()) - a0;
+    turn.agentUsage = perf.usageDelta(u0, await agentUsage(base, http));
 
     if (timedOut) { end('timeout'); break; }
     if (turn.approveError) { end('error', 'approve_failed'); break; }
@@ -469,7 +475,7 @@ function prices(env = process.env) {
   return input == null || output == null ? null : { input, output };
 }
 
-function rowsOf(s, trial, log, r, relabels, judgements) {
+function rowsOf(s, trial, log, r, relabels, judgements, { pack = null, config = null } = {}) {
   const rel = new Map(relabels.map((x) => [x.turn, x]));
   const judged = {};
   for (const j of judgements || []) judged[j.turn] = (judged[j.turn] || 0) + j.tokens;
@@ -481,6 +487,9 @@ function rowsOf(s, trial, log, r, relabels, judgements) {
         approvedBy: t.draft?.approved_by ?? null, autoSendFailed: t.autoSendFailed, approveError: t.approveError, tools: t.tools ?? [], toolMatch: g.toolMatch ?? null },
       relabel: x ? { intent: x.intent, level: x.level } : null, outbound: t.outbound, latencyMs: t.latencyMs,
       tokens: { ...t.tokens, judge: judged[i + 1] || 0, relabel: x?.tokens || 0 },
+      perf: perf.turnPerf({ scenario: s, turn: t, graded: g, pack, pass: r.pass }),
+      config: config && { set: config.set, split: config.split, trial, kbMode: config.kbMode, kbTopK: config.kbTopK,
+        kbSections: config.kbSections[s.channel] ?? null, models: config.models },
     };
   });
   const tokens = turns.reduce((a, t) => a + t.tokens.agent + t.tokens.customer + t.tokens.judge + t.tokens.relabel, 0);
@@ -507,10 +516,13 @@ async function main(argv = process.argv) {
 async function runMain(argv) {
   const o = parseArgs(argv, process.env);
   if (o.error) { console.error(o.error); return 2; }
-  let set; let compare = null;
+  let set; let compare = null; let compareRows = [];
   try {
     set = loadSet(o);
     if (o.compareTo) compare = JSON.parse(scenarios.readChecked(path.join(o.compareTo, 'meta.json')).toString('utf8'));
+    // 회차 기록은 있을 때만 읽는다(meta만 있는 폴더와도 비교는 돈다)
+    const prevTurns = o.compareTo && path.join(o.compareTo, 'turns.jsonl');
+    if (prevTurns && fs.existsSync(prevTurns)) compareRows = scenarios.readChecked(prevTurns).toString('utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
   } catch (e) {
     // 입력 내용(JSON 오류 메시지의 파일 앞부분)을 터미널에 싣지 않는다
     console.error(`거부: 입력을 읽지 못했다 — ${e instanceof SyntaxError ? 'JSON 형식 오류' : (e.code ?? e.message)}`);
@@ -557,6 +569,11 @@ async function runMain(argv) {
   const startedAt = new Date().toISOString();
   const { ask, usage } = simLlm.create({ provider: o.provider, models: o.models });
   const packs = Object.fromEntries(CHANNELS.map((c) => [c, policy.load(c)]));
+  // 접수 Agent 지식베이스 방식. 서버는 아직 읽지 않는다(RAG 버전과 같은 조건으로 비교하려고 기록만) — 서버가 읽게 되면 .env.example·deployment.md에 함께 올린다
+  const perfConfig = {
+    set: set.version, split: o.split, repeat: o.repeat, kbMode: process.env['KB_MODE']?.trim() || 'full', kbTopK: process.env['KB_TOPK']?.trim() || null,
+    kbSections: Object.fromEntries(CHANNELS.map((c) => [c, Object.keys(kbLoader.load(c).sections).length])), models: o.models,
+  };
   const baseline = set.entry ? {
     policy: CHANNELS.every((c) => packs[c].version === set.entry.policySha256?.[c]),
     kb: CHANNELS.every((c) => kbLoader.load(c).version === set.entry.kbSha256?.[c]),
@@ -592,7 +609,7 @@ async function runMain(argv) {
         let r = grade.applyRelabel(grade.gradeScenario(s, log, { autoSend: o.autoSend, responderMode: mode() }), relabels);
         if (judgements) r = grade.applyJudge(r, judgements);
         results.push(r);
-        const rows = rowsOf(s, trial, log, r, relabels, judgements);
+        const rows = rowsOf(s, trial, log, r, relabels, judgements, { pack: packs[s.channel], config: perfConfig });
         turnRows.push(...rows.turns); resultRows.push(rows.result);
         for (const k of Object.keys(versions)) for (const v of log.versions[k]) versions[k].add(v);
       }
@@ -623,12 +640,16 @@ async function runMain(argv) {
     versions: Object.fromEntries(Object.entries(versions).map(([k, v]) => [k, [...v].sort()])), baseline,
     maxTokens: o.maxTokens, approvedBy: o.approvedBy, startedAt, endedAt: new Date().toISOString(), sim: simHashes(), tokens,
     unsettled, // 기다린 뒤에도 돌던 케이스 수(0이 정상)
+    perfConfig, // 회차 기록의 설정(세트·split·반복·KB 방식·KB 절 수·모델)
   };
   const summary = {
     ...grade.aggregate(results, { workload, usage: usageAll, prices: prices(), meta: comparable(meta), compareMeta: compare && comparable(compare) }),
     partial: results.some((r) => r.ended === 'budget') || unsettled > 0, baseline, tokens,
   };
-  const md = grade.toMarkdown(summary).split('\n');
+  summary.perf = perf.summarize(turnRows);
+  summary.perfCompare = compare ? perf.compareRuns({ meta, rows: turnRows }, { meta: compare, rows: compareRows }) : null;
+  const perfMd = perf.toMarkdown(summary.perf, summary.perfCompare, perfConfig);
+  const md = `${grade.toMarkdown(summary)}\n${perfMd}`.split('\n');
   const notes = [];
   if (results.some((r) => r.ended === 'budget')) notes.push('> 부분 실행: 토큰 상한에 걸려 남은 시행은 budget으로 끝났다.');
   if (unsettled) notes.push(`> 부분 실행: 서버를 닫을 때 아직 돌던 케이스가 ${unsettled}건 있었다. 그 몫은 결과·토큰에 다 들어가지 않았을 수 있다.`);
@@ -645,6 +666,7 @@ async function runMain(argv) {
   await new Promise((r) => setImmediate(r));
   db.get('PRAGMA wal_checkpoint(TRUNCATE)');
 
+  console.log(perfMd);
   console.log(`실행 폴더: ${runDir}`);
   console.log(`시나리오 ${picked.length}건 × ${o.repeat}회 · pass^1 ${summary.pass1 ?? '-'} · 치명 ${summary.critical.count} · 의심 ${summary.suspects.count} · 토큰 ${tokens.total}(${tokens.source === 'metered' ? '응답 계측' : '리포트'})${summary.partial ? ' · 부분 실행' : ''}`);
   // 다 마치지 못한 실행(케이스가 남음)은 치명이 있어도 부분 실행(3)으로 끝낸다
