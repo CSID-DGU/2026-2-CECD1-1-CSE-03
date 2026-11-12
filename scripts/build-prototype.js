@@ -136,7 +136,7 @@ function protoCore(DATA, req, hooks) {
       if (x.status === 'PENDING') {
         const kb = kbOf(c.channel, mail.langOf(x.original_body));
         x.preview = mail.renderAgent({ name: c.customer_name, body: x.original_body });
-        x.kbPassages = Object.fromEntries((x.used_facts || []).map((k) => [k, kb.sections[k] ? kb.sections[k].text : '(KB에 없음 — 기한 지남 또는 삭제)']));
+        x.kbPassages = Object.fromEntries((x.used_facts || []).map((k) => [k, kb.sections[k] ? kb.sections[k].text : guard.isToolFact(k) ? '(고객사 시스템 조회 결과 — 이 고객의 상태·일정)' : '(KB에 없음 — 기한 지남 또는 삭제)']));
       }
     }
     return { case: c, threadIds: d.threadIds, messages: d.messages, drafts: d.drafts,

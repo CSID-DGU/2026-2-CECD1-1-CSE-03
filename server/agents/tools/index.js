@@ -16,18 +16,18 @@
 //   - 설명은 계약이다 — 무엇을 하는지, 언제 쓰는지·쓰지 않는지, 무엇을 돌려주지 않는지. 실제 동작과 어긋나면 안 된다.
 const GROUPS = [require('./knowledge'), require('./customer'), require('./orders'), require('./billing'), require('./account'), require('./meeting'), require('./web'), require('./draft')];
 const { out } = require('./schema');
-const { modelReasons } = require('./draft');
+const { modelReasons, factTools } = require('./draft');
 
 /** 이 회차에 노출할 툴 정의(기능 순서: 지식베이스 → 고객 이력 → 주문 → 결제 → 계정 → 담당자 일정 → 공식 사이트 → 초안). */
 const defs = (ctx) => GROUPS.flatMap((g) => g.defs(ctx));
 
 /**
- * 툴 실행기. 상태: 읽은 절, 검사를 통과한 마지막 초안, 초안을 써 봤는지, 남긴 지식베이스 빈 곳.
+ * 툴 실행기. 상태: 읽은 절, 성공한 툴 호출, 검사를 통과한 마지막 초안, 초안을 써 봤는지, 남긴 지식베이스 빈 곳.
  * lastPassed는 check_draft를 통과한 초안만 — 걸음 상한에 닿았을 때 돌려줄 수 있는 것은 이것뿐이다(걸린 초안은 절대 돌려주지 않는다).
  * run(name, input) → {(동기 툴) 또는 그 Promise(네트워크 툴)  content: string, isError: boolean, done?: result } — done이 있으면 루프가 끝난다.
  */
 function runner(ctx) {
-  const state = { read: new Set(), lastPassed: null, drafted: false, gaps: [], pages: 0 };
+  const state = { read: new Set(), called: new Set(), lastPassed: null, drafted: false, gaps: [], pages: 0 };
   const exposed = new Set(defs(ctx).map((d) => d.name));
   const handlers = Object.assign({}, ...GROUPS.map((g) => g.handlers(ctx, state)));
   return {
@@ -36,11 +36,12 @@ function runner(ctx) {
       if (!exposed.has(name)) return out({ error: `이 사이클에 없는 툴: ${name}`, next: `쓸 수 있는 툴: ${[...exposed].join(', ')}` }, true);
       const fail = (e) => out({ error: String(e?.message || e) }, true);
       try {
+        const ok = (x) => { if (!x?.isError) state.called.add(name); return x; }; // 근거 tool:<이름>은 이번에 성공한 호출만
         const r = handlers[name](input || {});
-        return typeof r?.then === 'function' ? r.catch(fail) : r; // 네트워크 툴은 Promise를 돌려준다
+        return typeof r?.then === 'function' ? r.then(ok, fail) : ok(r); // 네트워크 툴은 Promise를 돌려준다
       } catch (e) { return fail(e); }
     },
   };
 }
 
-module.exports = { defs, runner, modelReasons };
+module.exports = { defs, runner, modelReasons, factTools };
