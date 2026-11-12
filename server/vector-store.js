@@ -1,9 +1,10 @@
 'use strict';
-// KB 절 벡터 저장소. VECTOR_STORE(기본 memory). 메모리 구현은 이번 단계와 테스트용 — 프로세스가 끝나면 사라진다(기동 때 다시 색인한다).
-// 다음 단계: pgvector 구현을 같은 인터페이스로 붙인다(모두 async — DB 구현도 같은 호출 모양).
+// KB 절 벡터 저장소. VECTOR_STORE = memory(기본) | pgvector(server/vector-store-pg.js, PGVECTOR_URL — KB 벡터 전용, 운영 데이터는 SQLite).
+// 메모리 구현은 테스트·단일 프로세스 실험용 — 프로세스가 끝나면 사라진다(기동 때 다시 색인한다). 두 구현은 같은 인터페이스(모두 async)다.
 // 항목: { channel, language, key, hash(임베딩 입력의 해시), model, dim, vector(길이 1) }. 한 (channel, language, model, key)에 한 항목.
 //   get({channel, language, model, key}) → 항목 | null
-//   upsert(items)                                     — 같은 자리면 바꾼다
+//   hashes({channel, language, model}) → { [key]: {hash, dim} }  — 색인 맞춤이 절마다 묻지 않게 한 번에
+//   upsert(items)                                     — 같은 자리면 바꾼다(여러 개를 한 번에)
 //   prune({channel, language, model, keepKeys}) → 지운 수 — keepKeys 밖의 항목(지워졌거나 만료된 절)
 //   search({channel, language, model, dim, vector, topK}) → [{key, hash, score}] 점수(코사인) 내림차순, 같으면 키 순
 // 검색은 같은 채널·언어·모델·차원 안에서만 한다 — 모델을 바꾸면 다른 색인이다.
@@ -15,7 +16,12 @@ function createMemoryStore() {
   const scope = (x, q) => x.channel === q.channel && x.language === q.language && x.model === q.model;
   return {
     name: 'memory',
-    async get(q) { return items.get(id(q)) ?? null; },
+    async get(q) { const x = items.get(id(q)); return x ? { ...x, vector: [...x.vector] } : null; },
+    async hashes(q) {
+      const out = {};
+      for (const x of items.values()) if (scope(x, q)) out[x.key] = { hash: x.hash, dim: x.dim };
+      return out;
+    },
     async upsert(list) {
       for (const x of list) items.set(id(x), { channel: x.channel, language: x.language, key: x.key, hash: x.hash, model: x.model, dim: x.dim, vector: [...x.vector] });
     },
@@ -36,18 +42,26 @@ function createMemoryStore() {
       return out.sort((a, b) => b.score - a.score || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)).slice(0, q.topK);
     },
     async size() { return items.size; },
+    async close() {},
   };
 }
 
-const STORES = { memory: createMemoryStore };
+// pgvector는 쓸 때만 읽는다(pg 패키지를 memory·full 실행이 읽지 않게)
+const STORES = { memory: createMemoryStore, pgvector: () => require('./vector-store-pg').createPgStore() };
 let current = null; let currentName = null; let forced = null;
-/** 테스트가 저장소를 바꿔 끼운다 — null이면 env로 돌아간다(메모리 저장소는 새로 만든다). */
-const use = (s) => { forced = s || null; current = null; currentName = null; };
+/** 테스트가 저장소를 바꿔 끼운다 — null이면 env로 돌아간다(메모리 저장소는 새로 만든다). 앞 저장소(연결 풀)는 닫는다. */
+const use = (s) => {
+  if (current && current !== s) current.close?.().catch(() => {});
+  forced = s || null; current = null; currentName = null;
+};
 function store() {
   if (forced) return forced;
   const name = (process.env.VECTOR_STORE || 'memory').trim();
   if (!STORES[name]) throw fail('store_config', `VECTOR_STORE=${name} — 지원: ${Object.keys(STORES).join(', ')}`);
-  if (currentName !== name) { current = STORES[name](); currentName = name; }
+  if (currentName !== name) {
+    if (current) current.close?.().catch(() => {});
+    current = STORES[name](); currentName = name;
+  }
   return current;
 }
 

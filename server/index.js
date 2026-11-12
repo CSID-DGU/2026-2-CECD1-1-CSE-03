@@ -100,13 +100,18 @@ function preflight(env = process.env) {
   for (const k of ['RETENTION_DAYS', 'LLM_DAILY_TOKEN_BUDGET']) {
     if (env[k] && !/^[1-9]\d*$/.test(env[k])) errors.push(`${k}=${env[k]} — 비우거나 1 이상의 정수.`);
   }
-  // 접수 Agent RAG(KB_MODE=rag). 이번 단계의 임베딩·저장소는 mock·memory뿐이다
+  // 접수 Agent RAG(KB_MODE=rag). 임베딩은 mock뿐, 저장소는 memory | pgvector(PGVECTOR_URL). 접속 확인은 기동 뒤 미리 색인이 한다(여기서는 형식만)
   if (env.KB_MODE && !['full', 'rag'].includes(env.KB_MODE)) errors.push(`KB_MODE=${env.KB_MODE} — 비우거나 full | rag.`);
   if (env.KB_TOPK && !(/^[1-9]\d*$/.test(env.KB_TOPK) && Number(env.KB_TOPK) <= kbIndex.TOPK_MAX)) errors.push(`KB_TOPK=${env.KB_TOPK} — 비우거나 1~${kbIndex.TOPK_MAX} 정수.`);
   if (env.KB_TRIAGE_TOC && !['0', '1'].includes(env.KB_TRIAGE_TOC)) errors.push(`KB_TRIAGE_TOC=${env.KB_TRIAGE_TOC} — 비우거나 0 | 1.`);
   if (env.EMBED_PROVIDER && !embed.PROVIDERS[env.EMBED_PROVIDER]) errors.push(`EMBED_PROVIDER=${env.EMBED_PROVIDER} — 비우거나 ${Object.keys(embed.PROVIDERS).join(' | ')}.`);
   if (env.VECTOR_STORE && !vectorStore.STORES[env.VECTOR_STORE]) errors.push(`VECTOR_STORE=${env.VECTOR_STORE} — 비우거나 ${Object.keys(vectorStore.STORES).join(' | ')}.`);
-  if (prod && env.KB_MODE === 'rag') warnings.push('KB_MODE=rag — 임베딩은 mock, 벡터 저장소는 memory(시험용)입니다.');
+  const pg = (env.VECTOR_STORE || '').trim() === 'pgvector';
+  const pgUrl = String(env.PGVECTOR_URL || '').trim();
+  if (pgUrl && !/^postgres(ql)?:\/\/\S+$/.test(pgUrl)) errors.push('PGVECTOR_URL 형식이 아니다 — postgresql://<사용자>:<비밀번호>@<호스트>:<포트>/<DB>.'); // 값은 로그에 남기지 않는다
+  if (pg && env.KB_MODE === 'rag' && !pgUrl) errors.push('KB_MODE=rag, VECTOR_STORE=pgvector인데 PGVECTOR_URL이 비어 있다. 접속 주소를 넣거나 VECTOR_STORE를 비운다(memory).');
+  if (pg && env.KB_MODE !== 'rag') warnings.push('VECTOR_STORE=pgvector인데 KB_MODE가 rag가 아니다 — 벡터 저장소에 접속하지 않습니다.');
+  if (prod && env.KB_MODE === 'rag') warnings.push(`KB_MODE=rag — 임베딩은 mock(시험용), 벡터 저장소는 ${pg ? 'pgvector' : 'memory(시험용)'}입니다.`);
   // 자동 메일이 실제로 나가는 설정(smtp + 자동 발송 켬)에서만 — 꺼져 있으면 인증과 무관하게 자동 메일이 없다
   if (env.MAIL_PROVIDER === 'smtp' && policy.autoSendOn(env) && !policy.requireSenderAuth(env)) warnings.push('MAIL_PROVIDER=smtp인데 REQUIRE_SENDER_AUTH가 꺼져 있다 — 인증 결과 없는 메일에도 자동 메일이 나갑니다.');
   if (prod && (env.LLM_PROVIDER || (env.ANTHROPIC_API_KEY ? 'anthropic' : 'mock')) === 'anthropic' && !env.LLM_DAILY_TOKEN_BUDGET) warnings.push('일일 토큰 예산이 없습니다(LLM_DAILY_TOKEN_BUDGET) — LLM 비용 상한 없음.');
@@ -439,7 +444,11 @@ if (require.main === module) {
   // 기본은 이 컴퓨터에서만. 컨테이너는 이미지가 HOST=0.0.0.0을 준다.
   createServer().listen(port, process.env.HOST || '127.0.0.1', () => {
     console.log(`cs-agent http://localhost:${port}  llm=${llm.name()} mail=${mail.name()} auto_send=${policy.autoSendOn() ? 'on' : 'off'} sender_auth=${senderAuthMode()} retention=${retention.days() ?? 'off'} budget=${tokenBudget() ?? 'none'} db=${process.env.DB_PATH || 'data/cs-agent.db'}`);
-    if (kbIndex.config().mode === 'rag') kbIndexStatus().then((s) => console.log(`[kb-index] 미리 색인 ${s.channels.map((c) => `${c.channel}:${c.error || `${c.embedded}/${c.embedded + c.kept} ${c.ms}ms`}`).join(' ')}`), (e) => console.error('[kb-index]', e));
+    // 저장소 접속 실패(store_error)는 기동을 막지 않는다 — 회차마다 full로 폴백하고 retrieve 단계에 사유가 남는다
+    if (kbIndex.config().mode === 'rag') kbIndexStatus().then((s) => {
+      console.log(`[kb-index] 미리 색인(${s.store}) ${s.channels.map((c) => `${c.channel}:${c.error || `${c.embedded}/${c.embedded + c.kept} ${c.ms}ms`}`).join(' ')}`);
+      if (s.channels.some((c) => c.error)) console.warn(`\n!!! KB_MODE=rag인데 미리 색인 실패(${s.store}) — 고칠 때까지 접수 Agent는 KB 전체(full)로 돈다 !!!\n`);
+    }, (e) => console.error('[kb-index]', e));
     recover().catch((e) => console.error('[recover]', e));
     require('./sweeper').start();
     require('./notify').start();

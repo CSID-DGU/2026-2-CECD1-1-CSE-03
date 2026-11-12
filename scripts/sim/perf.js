@@ -62,7 +62,7 @@ function timingOf(decisions, receivedAt) {
 
 /**
  * KB_MODE=rag 회차의 retrieve 판정 행 → 기록 칸. full 회차(행 없음)는 null.
- * ms = 색인 맞춤 + 질문 임베딩 + 검색(전체 처리 시간 안에 이미 들어 있다 — 원인 분석용 보조 값).
+ * ms = 색인 맞춤 + 질문 임베딩 + 검색(전체 처리 시간 안에 이미 들어 있다 — 원인 분석용 보조 값). indexSkipped = 이미 맞춘 KB 판이라 맞춤을 건너뜀(indexMs 0).
  */
 function retrievalOf(row) {
   const o = row && parse(row.output);
@@ -73,7 +73,7 @@ function retrievalOf(row) {
     topK: o.topK ?? null, toc: o.toc ?? null, keys: hits.map((h) => h.key), scores: hits.map((h) => h.score),
     kbVersion: o.kbVersion ?? null, kbLanguage: o.kbLanguage ?? null, kbKeys: o.kbKeys ?? null,
     embed: o.embed ?? null, store: o.store ?? null,
-    ms: num(row.latency_ms), embedMs: num(o.ms?.embed), searchMs: num(o.ms?.search), indexMs: num(o.ms?.index), indexEmbedded: o.index?.embedded ?? null,
+    ms: num(row.latency_ms), embedMs: num(o.ms?.embed), searchMs: num(o.ms?.search), indexMs: num(o.ms?.index), indexEmbedded: o.index?.embedded ?? null, indexSkipped: o.index?.skipped ?? null,
   };
 }
 

@@ -98,13 +98,13 @@ test('turnPerf: 기대 intent는 첫 단계(없으면 포인터), kbHit 오판�
 const retRow = (out, ms = 7) => ({ step: 'retrieve', latency_ms: ms, output: JSON.stringify(out), created_at: at(1) });
 const ragOut = (keys, over = {}) => ({ requestedMode: 'rag', mode: 'rag', fallbackReason: null, toc: true, topK: 5, hits: keys.map((key, i) => ({ key, score: 0.9 - i / 10 })),
   kbVersion: 'kbv', kbLanguage: 'ko', kbKeys: ['receipt', 'login', 'features', 'a', 'b', 'c'], embed: { provider: 'mock', model: 'm', dim: 256 }, store: 'memory',
-  ms: { index: 1, embed: 2, search: 3 }, index: { embedded: 0, kept: 6, removed: 0 }, ...over });
+  ms: { index: 1, embed: 2, search: 3 }, index: { embedded: 0, kept: 6, removed: 0, skipped: false }, ...over });
 
 test('timingOf·turnPerf: retrieve 행에서 요청·실제 모드, 키·점수, 폴백 사유, KB 버전, 임베딩 모델, 시간(보조)을 남긴다', () => {
   const tm = P.timingOf([retRow(ragOut(['receipt', 'login'])), { step: 'execute', output: '{}', created_at: at(20) }], at(0));
   assert.deepEqual(tm.retrieval, { requestedMode: 'rag', mode: 'rag', fallbackReason: null, topK: 5, toc: true, keys: ['receipt', 'login'], scores: [0.9, 0.8],
     kbVersion: 'kbv', kbLanguage: 'ko', kbKeys: ['receipt', 'login', 'features', 'a', 'b', 'c'], embed: { provider: 'mock', model: 'm', dim: 256 }, store: 'memory',
-    ms: 7, embedMs: 2, searchMs: 3, indexMs: 1, indexEmbedded: 0 });
+    ms: 7, embedMs: 2, searchMs: 3, indexMs: 1, indexEmbedded: 0, indexSkipped: false });
   assert.equal(tm.totalMs, 20, '검색 시간은 전체 처리 시간 안에 들어 있다');
   assert.equal(P.timingOf([], at(0)).retrieval, null);
 
@@ -375,6 +375,9 @@ test('실행기(mock, KB_MODE=rag): 미리 색인을 기록하고 회차마다 �
   const receipt = turns.find((t) => t.scenario === 'sup-receipt-a-01');
   assert.deepEqual([receipt.perf.requestedMode, receipt.perf.kbMode], ['rag', 'rag']);
   assert.equal(receipt.perf.retrieval.indexEmbedded, 0, '미리 색인해 두어 회차 안에서 다시 임베딩하지 않는다');
+  assert.equal(receipt.perf.retrieval.indexSkipped, true, '미리 색인한 KB 판이면 회차 안에서 맞춤을 건너뛴다');
+  assert.equal(receipt.perf.retrieval.indexMs, 0);
+  assert.equal(receipt.perf.retrieval.store, 'memory', '저장소 이름이 회차 기록에 남는다');
   assert.ok(receipt.perf.retrieval.keys.length >= 1 && receipt.perf.retrieval.keys.length <= 5);
   assert.equal(receipt.perf.retrieval.embed.model, 'mock-hash-2gram-v1');
   assert.ok(receipt.perf.retrieval.kbVersion);

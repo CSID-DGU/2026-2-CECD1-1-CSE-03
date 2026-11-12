@@ -17,7 +17,7 @@ const triage = require('../server/agents/triage');
 const { sha } = require('../server/agents/common');
 const { preflight } = require('../server/index');
 
-const ENV = ['KB_MODE', 'KB_TOPK', 'KB_TRIAGE_TOC', 'EMBED_PROVIDER', 'VECTOR_STORE', 'RESPONDER_MODE'];
+const ENV = ['KB_MODE', 'KB_TOPK', 'KB_TRIAGE_TOC', 'EMBED_PROVIDER', 'VECTOR_STORE', 'PGVECTOR_URL', 'RESPONDER_MODE'];
 const origCheck = guard.check;
 before(() => { db.init(':memory:'); llm.use('mock'); });
 afterEach(() => {
@@ -228,8 +228,9 @@ test('폴백: 임베딩 오류·잘못된 벡터·빈 KB·설정 오류면 그 �
     ['embed_invalid', () => embed.use({ name: 'zero', model: 'z', dim: 2, raw: (t) => t.map(() => [0, 0]) })],
     ['embed_invalid', () => embed.use({ name: 'dim', model: 'w', dim: 3, raw: (t) => t.map(() => [1, 0]) })],
     ['embed_config', () => { process.env.EMBED_PROVIDER = 'bedrock'; }],
-    ['store_config', () => { process.env.VECTOR_STORE = 'pgvector'; }],
-    ['store_error', () => vstore.use({ name: 'down', get: async () => { throw new Error('db down'); } })],
+    ['store_config', () => { process.env.VECTOR_STORE = 'nosuch'; }],
+    ['store_config', () => { process.env.VECTOR_STORE = 'pgvector'; process.env.PGVECTOR_URL = ''; }],
+    ['store_error', () => vstore.use({ name: 'down', get: async () => { throw new Error('db down'); }, hashes: async () => { throw new Error('db down'); } })],
   ];
   publish(kbRaw());
   for (const [reason, setup] of cases_) {
@@ -270,7 +271,7 @@ test('설정: 기본 full·topK 5·목차 포함, 잘못된 KB_MODE·KB_TOPK·KB
   assert.deepEqual(kbIndex.config({ KB_MODE: 'rag', KB_TOPK: '3', KB_TRIAGE_TOC: '0' }), { mode: 'rag', topK: 3, toc: false });
   assert.deepEqual(preflight({}).errors, []);
   assert.deepEqual(preflight({ KB_MODE: 'rag', KB_TOPK: '5', KB_TRIAGE_TOC: '1', EMBED_PROVIDER: 'mock', VECTOR_STORE: 'memory' }).errors, []);
-  for (const [k, v] of [['KB_MODE', 'hybrid'], ['KB_TOPK', '0'], ['KB_TOPK', '51'], ['KB_TRIAGE_TOC', 'yes'], ['EMBED_PROVIDER', 'bedrock'], ['VECTOR_STORE', 'pgvector']]) {
+  for (const [k, v] of [['KB_MODE', 'hybrid'], ['KB_TOPK', '0'], ['KB_TOPK', '51'], ['KB_TRIAGE_TOC', 'yes'], ['EMBED_PROVIDER', 'bedrock'], ['VECTOR_STORE', 'redis']]) {
     assert.ok(preflight({ [k]: v }).errors.some((e) => e.startsWith(`${k}=`)), `${k}=${v}`);
   }
 });

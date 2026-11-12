@@ -573,6 +573,13 @@ async function runMain(argv) {
   // 첫 문의의 질문→답변 시간에 문서 색인 시간이 섞이지 않게(색인 시간은 index에 따로)
   const kbr = await postJson(http, `${srv.base}/api/test/kb-index`, {});
   const kbStatus = kbr.ok ? await kbr.json() : { mode: 'full', topK: null, toc: null, embed: null, store: null, channels: [] };
+  // rag인데 미리 색인이 실패했으면(저장소 접속·임베딩 오류) 모든 회차가 full로 폴백해 비교가 무의미하다 — 돌리지 않는다
+  const indexErr = kbStatus.mode === 'rag' ? kbStatus.channels.filter((c) => c.error) : [];
+  if (indexErr.length) {
+    await srv.close();
+    console.error(`거부: KB_MODE=rag인데 미리 색인 실패 (${indexErr.map((c) => `${c.channel}:${c.error}`).join(' ')}) — 저장소(${kbStatus.store})·임베딩 설정을 확인한다.`);
+    return 2;
+  }
   const perfConfig = {
     set: set.version, split: o.split, repeat: o.repeat, kbMode: kbStatus.mode, kbTopK: kbStatus.topK, triageToc: kbStatus.toc,
     embed: kbStatus.embed, vectorStore: kbStatus.store, index: kbStatus.channels,

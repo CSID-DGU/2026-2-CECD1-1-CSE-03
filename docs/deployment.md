@@ -41,7 +41,8 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `KB_TOPK` (5) | `server/kb-index.js` | rag에서 고를 절 수(1~50). 절이 그보다 적으면 전부. 범위 밖이면 시작 거부 |
 | `KB_TRIAGE_TOC` (1) | `server/kb-index.js` | rag에서 목차(모든 절의 키·제목)도 줄지. `0`이면 고른 절 본문만 |
 | `EMBED_PROVIDER` (mock) | `server/embed.js` | rag 임베딩 공급자. 지금은 `mock`(글자 2-gram 해시, 256차원, 네트워크 없음 — 이번 단계와 테스트용)뿐. Bedrock Cohere Embed v4(1536차원)는 다음 단계 |
-| `VECTOR_STORE` (memory) | `server/vector-store.js` | rag 벡터 저장소. 지금은 `memory`(프로세스 메모리 — 이번 단계와 테스트용, 기동 때 다시 색인)뿐. pgvector는 다음 단계 |
+| `VECTOR_STORE` (memory) | `server/vector-store.js` `server/vector-store-pg.js` | rag 벡터 저장소. `memory`(프로세스 메모리 — 테스트용, 기동 때 다시 색인) · `pgvector`(PostgreSQL + pgvector. KB 절 벡터만 두고 문의·결정·발송 같은 운영 데이터는 그대로 SQLite). pgvector는 표 `kb_vectors`(PK channel·language·model·key, 차원 없는 `vector` 열을 `dim` 열로 거름)를 기동 뒤 첫 색인 때 만들고(`CREATE EXTENSION IF NOT EXISTS vector` 권한 필요), 색인 없이 정확 검색(`<#>` 내적 = 코사인)한다. 다른 값이면 시작 거부 |
+| `PGVECTOR_URL` (없음) | `server/vector-store-pg.js` `server/index.js` | `VECTOR_STORE=pgvector` 접속 주소 `postgresql://<사용자>:<비밀번호>@<호스트>:<포트>/<DB>`. 접속 3초·질의 5초 제한. `KB_MODE=rag` + pgvector 인데 비어 있으면 시작 거부, 형식이 아니면 시작 거부(값은 로그에 남기지 않는다). `KB_MODE=full` 이면 접속하지 않는다. 접속이 안 되면 기동은 되고 경고를 남기며 회차마다 full 로 폴백(`retrieve` 사유 `store_error`). 평가 실행기(`sim:eval`)는 rag 미리 색인이 실패하면 돌리지 않는다(exit 2) |
 | `LLM_RETRY_SCALE` (1) | `server/loop.js` `server/llm/index.js` | 장애 재시도 간격(2·5·10·30분)과 차단기 열림 시간(60초)의 배수. 테스트에서 줄인다 |
 | `LLM_MOCK_DELAY_MS` (0) | `server/llm/mock.js` | mock 응답 지연. 대시보드에서 "돌아가는 중"을 보려면 1500 정도 |
 | `LLM_DAILY_TOKEN_BUDGET` (무제한) | `server/agents/common.js` `server/index.js` | 하루 입력+출력 토큰 상한(`llm_calls` 합계, 기준일 UTC — 한국 시간 09:00 초기화). 넘으면 LLM 을 부르지 않고 재시도 없이 담당자에게 넘긴다(`llm_error`). 1 이상 정수가 아니면 시작 거부. production + `anthropic` 인데 비어 있으면 기동 경고 |
@@ -85,6 +86,25 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `SES_PREFIX` (`inbound/`) | `scripts/inbound-ses.js` | 객체 키 접두어. 다른 버킷·접두어 밖·이상한 글자의 키는 원문을 받지 않고 지운다 |
 | `SES_CHANNELS` | `scripts/inbound-ses.js` | `받는주소=채널` 쉼표 목록(필수). 봉투 수신자로 채널을 고르고, 매핑이 없으면 지운다. 이 주소들과 `SMTP_FROM` 발신은 넘기지 않는다 |
 | `SES_MODE` (비움) | `scripts/inbound-ses.js` | `mirror` 면 페이로드에 `mirror: true` 를 싣고, `MAIL_PROVIDER=mock` + `AUTO_SEND` 끔 + 매핑된 채널 전부 `SHADOW_CHANNELS` 가 아니면 시작하지 않는다(종료 코드 2). 설정 오류(401·403, 503 `mirror_unsafe`, 미러의 4xx, S3 403)는 메시지를 돌려놓고 5→10→20→40→60분 정지하며 로그 머리말은 `[ses] 정지` |
+
+### 로컬 pgvector (Docker, Windows PowerShell)
+
+`VECTOR_STORE=pgvector` 를 로컬에서 시험할 때. 비밀번호는 예시 값을 쓰지 말고 직접 정한다. 컨테이너는 이 컴퓨터(127.0.0.1)에서만 열린다.
+
+```powershell
+$pw = '<비밀번호>'
+docker run -d --name cs-pgvector -e POSTGRES_USER=cs -e POSTGRES_PASSWORD=$pw -e POSTGRES_DB=cs_kb -p 127.0.0.1:55432:5432 pgvector/pgvector:pg17
+$env:PGVECTOR_URL = "postgresql://cs:$pw@127.0.0.1:55432/cs_kb"   # 형식: postgresql://<사용자>:<비밀번호>@<호스트>:<포트>/<DB>
+$env:KB_MODE = 'rag'; $env:VECTOR_STORE = 'pgvector'
+npm start
+
+# 정리
+Remove-Item Env:KB_MODE, Env:VECTOR_STORE, Env:PGVECTOR_URL
+docker stop cs-pgvector
+docker rm cs-pgvector
+```
+
+저장소 계약 테스트는 `PGVECTOR_URL` 이 있으면 pgvector 에도 돈다(임시 스키마를 만들고 끝나면 지운다). 없으면 pgvector 몫은 건너뛴다. 컨테이너 이미지(`Dockerfile`)는 `npm install` 을 하지 않아 `pg` 패키지가 없다 — 컨테이너에서 pgvector 를 쓰려면 이미지에 의존성 설치를 더해야 한다.
 
 ### 실 LLM 스모크 실행
 
