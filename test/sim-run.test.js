@@ -140,7 +140,7 @@ test('scripts/sim 소스: loop 모듈·SQL·허용 밖 DB 호출과 require가 �
     for (const m of src.matchAll(/\bdb\.(\w+)\(/g)) assert.ok(['init', 'file', 'get'].includes(m[1]), `${f}: db.${m[1]}`);
     for (const rest of src.split('db.get(').slice(1)) assert.ok(rest.startsWith("'PRAGMA wal_checkpoint(TRUNCATE)')"), f);
     for (const m of src.matchAll(/require\('([^']+)'\)/g)) {
-      // agents/tools는 실행 기록에 노출 툴 이름을 남기려고 defs만 읽는다(툴을 실행하지 않는다)
+      // agents/tools는 실행 기록에 노출 툴 이름을 남기고, 채점 근거로 등록 고객의 읽기 전용 사실 조회만 다시 부른다
       assert.match(m[1], /^node:|^\.\/\w+$|^\.\.\/\.\.\/server\/(index|db|policy|kb|guard|llm|llm\/anthropic|llm\/mock|mock\/inquiries|agents\/tools)$/, `${f}: ${m[1]}`);
     }
   }
@@ -707,4 +707,22 @@ test('등록 고객: --repeat>1은 거부하고(시행끼리 이력이 섞인다
   const meta = readJson(path.join(dir, 'meta.json'));
   assert.ok(meta.tools.support.includes('lookup_account') && meta.tools.onboarding.includes('find_meeting_slots') && !meta.tools.support.includes('find_meeting_slots'));
   assert.match(meta.businessDataSha256, /^[0-9a-f]{64}$/);
+});
+
+test('채점: 등록 고객이면 조회 결과(TOOLS)를 근거로 같이 준다 — 미등록이면 블록이 없다', async () => {
+  const prev = process.env.BUSINESS_DATA_FILE;
+  process.env.BUSINESS_DATA_FILE = path.join(ROOT, 'server', 'mock', 'business-data.json');
+  try {
+    const systems = []; const users = [];
+    const ask = async ({ system, user }) => { systems.push(system); users.push(user); return { result: { grounded: 2, noPromise: 2, answered: 2, tone: 2, quote: '' }, inputTokens: 0, outputTokens: 0 }; };
+    const turn = { customer: { body: '해지가 처리됐나요?' }, outbound: [{ sentBy: 'agent', body: '구독은 해지된 상태입니다.' }] };
+    await R.judgeLog({ scenario: { ...receipt(), customer: { name: '권하율', email: 'hayul.kwon@example.com' } }, log: { turns: [turn] }, ask });
+    await R.judgeLog({ scenario: receipt(), log: { turns: [turn] }, ask });
+    assert.match(users[0], /<<<TOOLS-[0-9a-f]+\n.*\[tool:lookup_billing\]\n\{"found":true.*"status":"canceled"/s);
+    assert.match(systems[0], /조회된 미팅 후보 시각/);
+    assert.doesNotMatch(users[1], /TOOLS/);
+    assert.doesNotMatch(systems[1], /조회된 미팅 후보 시각/);
+  } finally {
+    if (prev === undefined) delete process.env.BUSINESS_DATA_FILE; else process.env.BUSINESS_DATA_FILE = prev;
+  }
 });
