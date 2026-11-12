@@ -487,8 +487,8 @@ function rowsOf(s, trial, log, r, relabels, judgements, { pack = null, config = 
         approvedBy: t.draft?.approved_by ?? null, autoSendFailed: t.autoSendFailed, approveError: t.approveError, tools: t.tools ?? [], toolMatch: g.toolMatch ?? null },
       relabel: x ? { intent: x.intent, level: x.level } : null, outbound: t.outbound, latencyMs: t.latencyMs,
       tokens: { ...t.tokens, judge: judged[i + 1] || 0, relabel: x?.tokens || 0 },
-      perf: perf.turnPerf({ scenario: s, turn: t, graded: g, pack, pass: r.pass }),
-      config: config && { set: config.set, split: config.split, trial, kbMode: config.kbMode, kbTopK: config.kbTopK,
+      perf: perf.turnPerf({ scenario: s, turn: t, graded: g, pack, pass: r.pass, runMode: config?.kbMode ?? 'full' }),
+      config: config && { set: config.set, split: config.split, trial, kbMode: config.kbMode, kbTopK: config.kbTopK, triageToc: config.triageToc,
         kbSections: config.kbSections[s.channel] ?? null, models: config.models },
     };
   });
@@ -569,9 +569,13 @@ async function runMain(argv) {
   const startedAt = new Date().toISOString();
   const { ask, usage } = simLlm.create({ provider: o.provider, models: o.models });
   const packs = Object.fromEntries(CHANNELS.map((c) => [c, policy.load(c)]));
-  // 접수 Agent 지식베이스 방식. 서버는 아직 읽지 않는다(RAG 버전과 같은 조건으로 비교하려고 기록만) — 서버가 읽게 되면 .env.example·deployment.md에 함께 올린다
+  // 접수 Agent 지식베이스 방식(KB_MODE·KB_TOPK·KB_TRIAGE_TOC)은 서버가 읽은 값을 받는다. rag면 이 호출이 미리 색인한다 —
+  // 첫 문의의 질문→답변 시간에 문서 색인 시간이 섞이지 않게(색인 시간은 index에 따로)
+  const kbr = await postJson(http, `${srv.base}/api/test/kb-index`, {});
+  const kbStatus = kbr.ok ? await kbr.json() : { mode: 'full', topK: null, toc: null, embed: null, store: null, channels: [] };
   const perfConfig = {
-    set: set.version, split: o.split, repeat: o.repeat, kbMode: process.env['KB_MODE']?.trim() || 'full', kbTopK: process.env['KB_TOPK']?.trim() || null,
+    set: set.version, split: o.split, repeat: o.repeat, kbMode: kbStatus.mode, kbTopK: kbStatus.topK, triageToc: kbStatus.toc,
+    embed: kbStatus.embed, vectorStore: kbStatus.store, index: kbStatus.channels,
     kbSections: Object.fromEntries(CHANNELS.map((c) => [c, Object.keys(kbLoader.load(c).sections).length])), models: o.models,
   };
   const baseline = set.entry ? {
@@ -640,7 +644,7 @@ async function runMain(argv) {
     versions: Object.fromEntries(Object.entries(versions).map(([k, v]) => [k, [...v].sort()])), baseline,
     maxTokens: o.maxTokens, approvedBy: o.approvedBy, startedAt, endedAt: new Date().toISOString(), sim: simHashes(), tokens,
     unsettled, // 기다린 뒤에도 돌던 케이스 수(0이 정상)
-    perfConfig, // 회차 기록의 설정(세트·split·반복·KB 방식·KB 절 수·모델)
+    perfConfig, // 회차 기록의 설정(세트·split·반복·KB 방식·topK·목차·임베딩·저장소·미리 색인 결과·KB 절 수·모델)
   };
   const summary = {
     ...grade.aggregate(results, { workload, usage: usageAll, prices: prices(), meta: comparable(meta), compareMeta: compare && comparable(compare) }),

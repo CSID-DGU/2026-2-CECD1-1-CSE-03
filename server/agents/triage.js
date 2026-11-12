@@ -81,9 +81,21 @@ const normalize = (r) => ({
 
 const SOURCE = promptSource('triage', system, user);
 
+// KB_MODE=rag — ctx.kb가 kb-index.triageView(검색된 절 본문 + 목차)일 때. 정책·intent 목록·출력 형식은 full과 같다
+const systemRag = (pack) => `${system(pack)}
+지식 베이스 블록에는 이 메시지와 글이 가까운 절만 본문이 실려 있다(목차가 있으면 모든 절의 키·제목도 있다). 실린 순서는 글이 비슷한 정도일 뿐, 사실인지·답할 수 있는지와 무관하다.
+kbHit·kbSections는 본문이 실린 절만 보고 정한다. 목차에만 있는 절은 kbSections에 넣지 않는다.`;
+const kbRag = (kb) => [
+  kb.toc ? `[목차 — 모든 절의 키·제목]\n${kb.toc.map((s) => `- ${s.key}: ${s.title}`).join('\n')}` : null,
+  `[본문 — 고른 절]\n${kb.text || '(없음)'}`,
+].filter(Boolean).join('\n\n');
+const userRag = (ctx) => user({ ...ctx, kb: { ...ctx.kb, text: kbRag(ctx.kb) } });
+const SOURCE_RAG = promptSource('triage', systemRag, kbRag, userRag, system, user);
+
 async function run(ctx) {
-  const out = await call({ agent: 'triage', system: system(ctx.pack), user: user(ctx), schema: SCHEMA, ctx, source: SOURCE });
+  const rag = ctx.kb?.mode === 'rag';
+  const out = await call({ agent: 'triage', system: rag ? systemRag(ctx.pack) : system(ctx.pack), user: rag ? userRag(ctx) : user(ctx), schema: SCHEMA, ctx, source: rag ? SOURCE_RAG : SOURCE });
   return { ...out, result: normalize(out.result) };
 }
 
-module.exports = { run, SCHEMA, normalize, SOURCE };
+module.exports = { run, SCHEMA, normalize, SOURCE, SOURCE_RAG, user, userRag };

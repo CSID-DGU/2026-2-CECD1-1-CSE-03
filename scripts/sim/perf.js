@@ -56,7 +56,43 @@ function timingOf(decisions, receivedAt) {
     responderLlmMs: traces.length ? sumOf(steps.map((s) => num(s.llmMs) ?? 0)) : null,
     responderToolMs: traces.length ? sumOf(steps.flatMap((s) => asList(s.calls).map((c) => num(c.toolMs) ?? 0))) : null,
     kbHit: triage && 'kbHit' in triage ? triage.kbHit : null,
+    retrieval: retrievalOf(of('retrieve').at(-1) ?? null),
   };
+}
+
+/**
+ * KB_MODE=rag 회차의 retrieve 판정 행 → 기록 칸. full 회차(행 없음)는 null.
+ * ms = 색인 맞춤 + 질문 임베딩 + 검색(전체 처리 시간 안에 이미 들어 있다 — 원인 분석용 보조 값).
+ */
+function retrievalOf(row) {
+  const o = row && parse(row.output);
+  if (!o) return null;
+  const hits = asList(o.hits);
+  return {
+    requestedMode: o.requestedMode ?? 'rag', mode: o.mode ?? null, fallbackReason: o.fallbackReason ?? null,
+    topK: o.topK ?? null, toc: o.toc ?? null, keys: hits.map((h) => h.key), scores: hits.map((h) => h.score),
+    kbVersion: o.kbVersion ?? null, kbLanguage: o.kbLanguage ?? null, kbKeys: o.kbKeys ?? null,
+    embed: o.embed ?? null, store: o.store ?? null,
+    ms: num(row.latency_ms), embedMs: num(o.ms?.embed), searchMs: num(o.ms?.search), indexMs: num(o.ms?.index), indexEmbedded: o.index?.embedded ?? null,
+  };
+}
+
+/**
+ * 검색 평가(정책 팩 intent→kb 매핑을 정답 절의 대용으로 쓴다 — 완전한 정답 라벨이 아니다).
+ * 정답 = 기대 intent의 kb 절 중 지금 KB에 있는 절(유효 정답). Recall@K = 검색된 유효 정답 수 / 유효 정답 수, Hit@K = 하나라도 검색됐는가.
+ * rag로 검색한 회차만 본다(full·폴백 회차는 null). 평가할 수 없으면 {na: 사유}.
+ */
+function retrievalScore(exp, pack, r) {
+  if (!r || r.mode !== 'rag') return null;
+  const intents = asList(exp);
+  if (!intents.length) return { na: 'no_expected_intent' };
+  if (intents.length > 1) return { na: 'ambiguous_intent' };
+  const gold = asList(pack?.intents?.[intents[0]]?.kb);
+  if (!gold.length) return { na: 'no_gold_section' };
+  const valid = r.kbKeys ? gold.filter((k) => r.kbKeys.includes(k)) : gold;
+  if (!valid.length) return { na: 'gold_not_in_kb' };
+  const found = valid.filter((k) => r.keys.includes(k));
+  return { na: null, gold: valid, found, recall: found.length / valid.length, hit: found.length > 0 };
 }
 
 /** 이 턴의 기대 intent — grade.js 첫 턴 intent 판정과 같은 규칙(고객이 적은 첫 단계, 없으면 포인터 단계). */
@@ -67,13 +103,19 @@ function expectedIntent(scenario, { stepIds, pointer } = {}) {
 
 /**
  * turns.jsonl 한 줄의 perf 칸. turn = runScenario 턴 로그, graded = grade 턴 행, pack = 그 채널 정책 팩.
- * kbMiss: 기대 intent 중 정책 팩 kb 절이 있는 것이 있는데 접수 Agent가 kbHit=false로 판단. 기대 intent에 kb 절이 없거나 접수를 안 거쳤으면 null.
+ * kbMiss: 기대 intent 중 정책 팩 kb 절이 있는 것이 있고 기대 결과가 답장(auto·approve)인데 접수 Agent가 kbHit=false로 판단.
+ *   기대 결과가 넘김·답장+넘김·무시면 kbHit=false가 안전한 넘김일 수 있어 판단하지 않는다(null). kb 절이 없거나 접수를 안 거쳤어도 null.
  */
-function turnPerf({ scenario, turn, graded, pack, pass }) {
+// requestedMode = 실행 설정(KB_MODE), kbMode = 이 회차 접수 Agent가 실제로 받은 KB(rag·full, rag 실행에서 접수를 안 거친 회차는 null)
+function turnPerf({ scenario, turn, graded, pack, pass, runMode = 'full' }) {
   const t = turn.timing ?? {};
   const exp = expectedIntent(scenario, turn);
   const kbIntent = asList(exp).some((i) => asList(pack?.intents?.[i]?.kb).length > 0);
+  const answerExpected = ['auto', 'approve'].includes(grade.keyOf(graded.label));
+  const r = t.retrieval ?? null;
   return {
+    requestedMode: r?.requestedMode ?? runMode, kbMode: r ? r.mode : runMode === 'rag' ? null : 'full', fallbackReason: r?.fallbackReason ?? null,
+    retrieval: r, retrievalScore: retrievalScore(exp, pack, r),
     channel: scenario.channel, totalMs: t.totalMs ?? null, receivedAt: t.receivedAt ?? null, decidedAt: t.decidedAt ?? null,
     triageMs: t.triageMs ?? null, responderMs: t.responderMs ?? null,
     responderSteps: t.responderSteps ?? null, responderLlmMs: t.responderLlmMs ?? null, responderToolMs: t.responderToolMs ?? null,
@@ -82,7 +124,7 @@ function turnPerf({ scenario, turn, graded, pack, pass }) {
     intentMatch: exp == null ? null : asList(exp).includes(turn.triageIntent),
     expectedOutcome: grade.keyOf(graded.label), actualOutcome: grade.keyOf(graded.outcome),
     outcomeMatch: graded.match, // grade.js gradeScenario의 match(infra 턴은 null)
-    kbHit: t.kbHit ?? null, kbMiss: !kbIntent || t.kbHit == null ? null : t.kbHit === false,
+    kbHit: t.kbHit ?? null, kbMiss: !kbIntent || !answerExpected || t.kbHit == null ? null : t.kbHit === false,
     pass,
   };
 }
@@ -90,6 +132,7 @@ function turnPerf({ scenario, turn, graded, pack, pass }) {
 /* ---------------- 집계 ---------------- */
 
 const perfRows = (rows) => asList(rows).filter((r) => r && r.perf);
+const evaluable = (rs) => rs.filter((r) => r.perf.retrievalScore && r.perf.retrievalScore.na === null);
 const nums = (rs, f) => rs.map(f).filter((v) => num(v) !== null);
 const tok = (rs, agent, k) => mean(rs.filter((r) => (r.perf.tokens?.[agent]?.calls || 0) > 0).map((r) => r.perf.tokens[agent][k]));
 const rate = (rs, k) => { const xs = rs.filter((r) => typeof r.perf[k] === 'boolean'); return ratio(xs.filter((r) => r.perf[k]).length, xs.length); };
@@ -116,8 +159,21 @@ const METRICS = [
   ['outcomeAccuracy', '결과 정확도', 1, (rs) => rate(rs, 'outcomeMatch')],
   ['kbMissRate', 'kbHit 오판 비율', -1, (rs) => rate(rs, 'kbMiss')],
   ['passRate', '채점 통과율', 1, passRate],
+  // rag 회차만(full 실행이면 -). 검색 시간은 전체 처리 시간 안에 들어 있는 원인 분석용 보조 값
+  ['fallbackRate', 'rag 폴백 비율', -1, (rs) => { const xs = rs.filter((r) => r.perf.retrieval); return ratio(xs.filter((r) => r.perf.kbMode !== 'rag').length, xs.length); }],
+  ['retrieveP50', '검색 시간 p50(ms, 보조)', -1, (rs) => pct(nums(rs.filter((r) => r.perf.kbMode === 'rag'), (r) => r.perf.retrieval.ms), 50)],
+  ['recallAtK', 'Recall@K', 1, (rs) => mean(evaluable(rs).map((r) => r.perf.retrievalScore.recall))],
+  ['hitAtK', 'Hit@K', 1, (rs) => { const xs = evaluable(rs); return ratio(xs.filter((r) => r.perf.retrievalScore.hit).length, xs.length); }],
 ];
 const CHANNEL_METRICS = ['totalP50', 'totalP95', 'totalMean'];
+// 모드별(정상 rag · 폴백 · full) 요약에 쓰는 지표
+const MODE_METRICS = ['totalP50', 'totalP95', 'totalMean', 'intentAccuracy', 'outcomeAccuracy', 'passRate'];
+const MODE_GROUPS = [
+  ['rag', '정상 rag', (r) => r.perf.kbMode === 'rag'],
+  ['fallback', 'rag 폴백(full로 돔)', (r) => r.perf.requestedMode === 'rag' && r.perf.kbMode === 'full'],
+  ['noTriage', 'rag 실행·접수 안 거침', (r) => r.perf.requestedMode === 'rag' && r.perf.kbMode == null],
+  ['full', 'full', (r) => (r.perf.requestedMode ?? 'full') === 'full'],
+];
 
 const metricsOf = (rs, keys = METRICS.map((m) => m[0])) => Object.fromEntries(METRICS.filter((m) => keys.includes(m[0])).map(([k, , , f]) => [k, f(rs)]));
 
@@ -140,7 +196,25 @@ function summarize(rows) {
       outcome: rs.filter((r) => typeof r.perf.outcomeMatch === 'boolean').length, kbMiss: rs.filter((r) => r.perf.kbMiss !== null).length },
     overall: metricsOf(rs),
     byChannel: Object.fromEntries(channels.map((c) => { const x = rs.filter((r) => r.perf.channel === c); return [c, { turns: x.length, ...metricsOf(x, CHANNEL_METRICS) }]; })),
+    byMode: Object.fromEntries(MODE_GROUPS.flatMap(([k, , pick]) => { const x = rs.filter(pick); return x.length ? [[k, { turns: x.length, ...metricsOf(x, MODE_METRICS) }]] : []; })),
+    retrieval: retrievalCounts(rs),
     spread,
+  };
+}
+
+/** 검색 회차 수 — 정상 rag, 폴백(사유별), 검색 평가 가능·제외(사유별). rag 실행이 아니면 null. */
+function retrievalCounts(rs) {
+  const tried = rs.filter((r) => r.perf.retrieval);
+  if (!tried.length) return null;
+  const tally = (xs) => xs.reduce((a, x) => { a[x] = (a[x] || 0) + 1; return a; }, {});
+  const rag = tried.filter((r) => r.perf.kbMode === 'rag');
+  const scored = rag.map((r) => r.perf.retrievalScore).filter(Boolean);
+  return {
+    turns: tried.length, rag: rag.length, fallback: tried.length - rag.length,
+    fallbackBy: tally(tried.filter((r) => r.perf.kbMode !== 'rag').map((r) => r.perf.fallbackReason || 'unknown')),
+    evaluable: scored.filter((x) => x.na === null).length, excluded: scored.filter((x) => x.na !== null).length,
+    excludedBy: tally(scored.filter((x) => x.na !== null).map((x) => x.na)),
+    topK: [...new Set(tried.map((r) => r.perf.retrieval.topK))],
   };
 }
 
@@ -174,7 +248,10 @@ function compareRuns(cur, prev) {
   const sameOutcome = { pairs: same.length,
     p50: { prev: pct(t(sp), 50), cur: pct(t(sc), 50) }, p95: { prev: pct(t(sp), 95), cur: pct(t(sc), 95) } };
   for (const q of ['p50', 'p95']) sameOutcome[q].delta = sameOutcome[q].prev == null || sameOutcome[q].cur == null ? null : sameOutcome[q].cur - sameOutcome[q].prev;
-  return { prevRunId: pm.runId ?? null, warnings, metrics, pairs: pairs.length, changed, changedRate: ratio(changed.length, pairs.length), sameOutcome };
+  // 접수 KB 방식(full·rag)은 비교하려는 차이라 경고가 아니라 따로 적는다. KB_TOPK·목차가 다르면 같은 rag라도 조건이 다르다
+  const mode = (m) => (m.perfConfig ? `${m.perfConfig.kbMode ?? 'full'}${m.perfConfig.kbMode === 'rag' ? `(K=${m.perfConfig.kbTopK ?? '-'}, 목차 ${m.perfConfig.triageToc === false ? '없음' : '있음'})` : ''}` : 'full');
+  const kbModes = { prev: mode(pm), cur: mode(cm) };
+  return { prevRunId: pm.runId ?? null, warnings, kbModes, metrics, pairs: pairs.length, changed, changedRate: ratio(changed.length, pairs.length), sameOutcome };
 }
 
 /* ---------------- 표 ---------------- */
@@ -185,8 +262,13 @@ const signed = (v) => (v == null ? '-' : `${v > 0 ? '+' : ''}${f(v)}`);
 function toMarkdown(s, cmp = null, config = null) {
   const L = ['## 회차별 처리 시간·정확도', ''];
   if (config) {
-    L.push(`- 세트 ${config.set ?? '-'} · split ${config.split} · 반복 ${config.repeat} · KB_MODE ${config.kbMode} · KB_TOPK ${config.kbTopK ?? '-'}`,
-      `- KB 절 수: ${Object.entries(config.kbSections).map(([c, n]) => `${c} ${n}`).join(', ')}`,
+    L.push(`- 세트 ${config.set ?? '-'} · split ${config.split} · 반복 ${config.repeat} · KB_MODE ${config.kbMode} · KB_TOPK ${config.kbTopK ?? '-'}${config.kbMode === 'rag' ? ` · 목차 ${config.triageToc === false ? '없음' : '있음'}` : ''}`,
+      `- KB 절 수: ${Object.entries(config.kbSections).map(([c, n]) => `${c} ${n}`).join(', ')}`);
+    if (config.kbMode === 'rag') {
+      L.push(`- 임베딩 ${config.embed ? `${config.embed.provider}/${config.embed.model} ${config.embed.dim}차원` : '-'} · 저장소 ${config.vectorStore ?? '-'}`,
+        `- 미리 색인(질문→답변 시간과 별도): ${asList(config.index).map((c) => (c.error ? `${c.channel} 실패(${c.error})` : `${c.channel} ${c.embedded}/${c.embedded + c.kept}절 ${c.ms}ms`)).join(', ') || '-'}`);
+    }
+    L.push(
       `- 모델: 에이전트 ${config.models.agent ?? '-'} · 고객 ${config.models.customer ?? '-'} · 채점 ${config.models.judge ?? '-'}`, '');
   }
   L.push(`- 회차 ${s.turns}(시간 있는 회차 ${s.counts.timed}) · 시행 ${s.trials}`, '');
@@ -195,9 +277,24 @@ function toMarkdown(s, cmp = null, config = null) {
   for (const [k, name] of METRICS) L.push(`| ${name} | ${f(s.overall[k])} |${spread ? ` ${f(s.spread[k]?.min)} | ${f(s.spread[k]?.max)} |` : ''}`);
   L.push('', '| 채널 | 회차 | p50(ms) | p95(ms) | 평균(ms) |', '| --- | --- | --- | --- | --- |');
   for (const [c, m] of Object.entries(s.byChannel)) L.push(`| ${c} | ${m.turns} | ${f(m.totalP50)} | ${f(m.totalP95)} | ${f(m.totalMean)} |`);
-  L.push('', '- 전체 처리 시간 = 고객 메일 접수 → 초안 저장·넘김·무시 결정. 토큰 평균은 그 에이전트를 부른 회차만. 채점 통과율은 시나리오 시행 단위.');
+  if (s.byMode && Object.keys(s.byMode).length) {
+    L.push('', '| 접수 KB | 회차 | p50(ms) | p95(ms) | 평균(ms) | intent 정확도 | 결과 정확도 | 채점 통과율 |', '| --- | --- | --- | --- | --- | --- | --- | --- |');
+    for (const [k, label] of MODE_GROUPS) {
+      const m = s.byMode[k];
+      if (m) L.push(`| ${label} | ${m.turns} | ${f(m.totalP50)} | ${f(m.totalP95)} | ${f(m.totalMean)} | ${f(m.intentAccuracy)} | ${f(m.outcomeAccuracy)} | ${f(m.passRate)} |`);
+    }
+  }
+  const rc = s.retrieval;
+  if (rc) {
+    const by = (o) => Object.entries(o).map(([k, n]) => `${k} ${n}`).join(', ') || '없음';
+    L.push('', `- 검색: 회차 ${rc.turns} · 정상 rag ${rc.rag} · 폴백 ${rc.fallback} (${by(rc.fallbackBy)}) · K=${rc.topK.join('/')}`,
+      `- 검색 평가(정책 팩 intent→kb 매핑을 정답 대용으로): 평가 ${rc.evaluable} · 제외(N/A) ${rc.excluded} (${by(rc.excludedBy)})`);
+  }
+  L.push('', '- 전체 처리 시간 = 고객 메일 접수 → 초안 저장·넘김·무시 결정(rag면 질문 임베딩·검색 포함). 토큰 평균은 그 에이전트를 부른 회차만. 채점 통과율은 시나리오 시행 단위.',
+    '- kbHit 오판은 기대 결과가 답장(auto·approve)인 회차만 센다. 넘김이 기대인 회차의 kbHit=false는 안전한 넘김일 수 있다.');
   if (cmp) {
     L.push('', `## 이전 실행과 비교 (${cmp.prevRunId ?? '-'})`, '');
+    if (cmp.kbModes) L.push(`- 접수 KB 방식: ${cmp.kbModes.prev} → ${cmp.kbModes.cur}`, '');
     for (const w of cmp.warnings) L.push(`> 경고: ${w}`);
     if (cmp.warnings.length) L.push('');
     L.push('| 지표 | 이전 | 이번 | 차이 |', '| --- | --- | --- | --- |');
@@ -212,4 +309,4 @@ function toMarkdown(s, cmp = null, config = null) {
   return L.join('\n');
 }
 
-module.exports = { METRICS, usageSnapshot, usageDelta, timingOf, expectedIntent, turnPerf, summarize, compareRuns, toMarkdown };
+module.exports = { METRICS, MODE_GROUPS, usageSnapshot, usageDelta, timingOf, retrievalOf, retrievalScore, expectedIntent, turnPerf, summarize, compareRuns, toMarkdown };

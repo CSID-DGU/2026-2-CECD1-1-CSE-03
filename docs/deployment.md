@@ -37,6 +37,11 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `BUSINESS_DATA_FILE` (없음) | `server/agents/tools/business.js` | 주문·결제·계정 조회 툴과 담당자 빈 시간 툴의 원본 JSON 파일(시험용 목 데이터 `server/mock/business-data.json`). 비우면 네 툴을 숨긴다. 고객사 시스템이 정해지면 `load()`를 실제 연동으로 바꾼다. 평가 실행기(`sim:eval`)는 이 값과 상관없이 목 데이터로 고정한다 |
 | `OFFICIAL_SITE_DOMAINS` (없음) | `server/agents/tools/web.js` | 공식 사이트 읽기 툴이 열 수 있는 도메인(쉼표 목록, 하위 도메인 포함, 예 `help.example.com,status.example.com`). 비우면 툴을 숨긴다. https와 이 도메인만 열리고 내부망 주소·이동 경로는 막는다 |
 | `REACT_MAX_STEPS` (6) | `server/agents/responder.js` | react 한 사이클의 LLM 걸음 상한. 끝내는 툴 없이 닿으면 사람에게(llm_error) |
+| `KB_MODE` (full) | `server/kb-index.js` `server/loop.js` `server/index.js` | 접수 Agent가 받는 지식베이스. `full`은 KB 전체(기존 동작). `rag`는 가린 문의 제목·본문을 회차마다 한 번 임베딩해 가까운 절 `KB_TOPK`개 본문(+목차)만 접수 Agent에게 준다. 답장·검수·인계·툴·guard·판단 기록의 `kb_version`은 늘 전체 KB. 검색이 안 되면 그 회차는 full로 돌고 판단 기록 `retrieve` 단계에 폴백 사유가 남는다. 다른 값이면 시작 거부 |
+| `KB_TOPK` (5) | `server/kb-index.js` | rag에서 고를 절 수(1~50). 절이 그보다 적으면 전부. 범위 밖이면 시작 거부 |
+| `KB_TRIAGE_TOC` (1) | `server/kb-index.js` | rag에서 목차(모든 절의 키·제목)도 줄지. `0`이면 고른 절 본문만 |
+| `EMBED_PROVIDER` (mock) | `server/embed.js` | rag 임베딩 공급자. 지금은 `mock`(글자 2-gram 해시, 256차원, 네트워크 없음 — 이번 단계와 테스트용)뿐. Bedrock Cohere Embed v4(1536차원)는 다음 단계 |
+| `VECTOR_STORE` (memory) | `server/vector-store.js` | rag 벡터 저장소. 지금은 `memory`(프로세스 메모리 — 이번 단계와 테스트용, 기동 때 다시 색인)뿐. pgvector는 다음 단계 |
 | `LLM_RETRY_SCALE` (1) | `server/loop.js` `server/llm/index.js` | 장애 재시도 간격(2·5·10·30분)과 차단기 열림 시간(60초)의 배수. 테스트에서 줄인다 |
 | `LLM_MOCK_DELAY_MS` (0) | `server/llm/mock.js` | mock 응답 지연. 대시보드에서 "돌아가는 중"을 보려면 1500 정도 |
 | `LLM_DAILY_TOKEN_BUDGET` (무제한) | `server/agents/common.js` `server/index.js` | 하루 입력+출력 토큰 상한(`llm_calls` 합계, 기준일 UTC — 한국 시간 09:00 초기화). 넘으면 LLM 을 부르지 않고 재시도 없이 담당자에게 넘긴다(`llm_error`). 1 이상 정수가 아니면 시작 거부. production + `anthropic` 인데 비어 있으면 기동 경고 |

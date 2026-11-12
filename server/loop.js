@@ -7,6 +7,7 @@ const events = require('./events');
 const cases = require('./cases');
 const policy = require('./policy');
 const kbLoader = require('./kb');
+const kbIndex = require('./kb-index');
 const guard = require('./guard');
 const prefilter = require('./prefilter');
 const mail = require('./mail');
@@ -146,6 +147,27 @@ async function drain(caseId) {
   try { await runCycle(caseId, next); } catch (e) { console.error('[loop] drain', e); }
 }
 
+/**
+ * 접수 Agent용 맥락. KB_MODE=full이면 ctx 그대로(기록 없음). rag면 가린 제목·본문을 한 번 임베딩해 가까운 절 topK를 찾고
+ * ctx.kb만 검색 보기로 바꾼 복사본을 준다. 검색이 안 되면(임베딩·저장소 오류, 빈·닫힌 KB, 결과 없음) 이 회차는 full로 돈다.
+ * 요청 모드·실제 모드·폴백 사유를 retrieve 단계로 남긴다(latency_ms = 색인 맞춤 + 질문 임베딩 + 검색).
+ */
+async function triageContext(ctx, subject, summary) {
+  const cfg = kbIndex.config();
+  if (cfg.mode !== 'rag') return ctx;
+  const t0 = Date.now();
+  let out; let view = null;
+  try {
+    const r = await kbIndex.retrieve({ channel: ctx.channel, kb: ctx.kb, query: `${subject}\n${ctx.message.body_clean}`, topK: cfg.topK });
+    view = kbIndex.triageView(ctx.kb, r.hits, { toc: cfg.toc });
+    out = { requestedMode: 'rag', mode: 'rag', fallbackReason: null, toc: cfg.toc, ...r };
+  } catch (e) {
+    out = { requestedMode: 'rag', mode: 'full', fallbackReason: String(e?.code || 'retrieve_error'), toc: cfg.toc, topK: cfg.topK, kbVersion: ctx.kb.version, kbLanguage: ctx.kb.language };
+  }
+  record(ctx.caseId, ctx.messageId, 'retrieve', 'code', out, { action: out.mode === 'rag' ? 'RAG' : 'FALLBACK', reason: out.fallbackReason, inputSummary: summary, versions: ctx.versions, latencyMs: Date.now() - t0 });
+  return view ? { ...ctx, kb: view } : ctx;
+}
+
 async function cycle(caseId, messageId) {
   const c = db.get('SELECT * FROM cases WHERE id=?', caseId);
   const msg = db.get('SELECT rowid AS rid, * FROM messages WHERE id=?', messageId);
@@ -206,8 +228,9 @@ async function cycle(caseId, messageId) {
   const senderTrusted = policy.senderTrusted(msg.sender_auth, c.customer_email); // 아니면 L2 intent도 승인 대기
   let decision; let extra;
   try {
-    // ④ 분류
-    const tri = await triageAgent.run(ctx);
+    // ④ 분류 — KB_MODE=rag면 접수 Agent에게만 검색한 절을 준다. ctx.kb(전체)는 답장·검사·기록에 그대로 간다
+    const tctx = await triageContext(ctx, mask(msg.subject || ''), summary);
+    const tri = await triageAgent.run(tctx);
     const triage = tri.result;
     record(caseId, messageId, 'triage', 'triage', triage, { action: 'CLASSIFIED', reason: triage.intent, inputSummary: triage.questionSummary, versions: { ...versions, prompt: tri.promptVersion }, latencyMs: tri.latencyMs });
     const repeatStreak = triage.repeatsPrevious ? loop.repeat_streak + 1 : 0;

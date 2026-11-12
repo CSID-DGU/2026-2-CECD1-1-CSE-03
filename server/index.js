@@ -19,6 +19,9 @@ const store = require('./store');
 const crm = require('./crm');
 const guard = require('./guard');
 const configConsole = require('./console');
+const kbIndex = require('./kb-index');
+const embed = require('./embed');
+const vectorStore = require('./vector-store');
 const pkg = require('../package.json');
 
 const { HttpError } = cases;
@@ -44,6 +47,14 @@ const testInjectOn = () => process.env.ENABLE_TEST_INJECT === '1' || (process.en
 const mailWarning = () => (process.env.NODE_ENV === 'production' && mail.name() === 'mock' ? 'mock — 실제 발송 안 됨' : undefined);
 const senderAuthMode = () => (policy.requireSenderAuth() ? 'required' : 'optional');
 const tokenBudget = () => Number(process.env.LLM_DAILY_TOKEN_BUDGET) || null; // 형식은 시작 검사가 본다
+/** 접수 Agent KB 설정 + rag면 채널마다 미리 색인(이미 맞으면 다시 임베딩하지 않는다). full이면 색인하지 않는다. */
+async function kbIndexStatus() {
+  const cfg = kbIndex.config();
+  if (cfg.mode !== 'rag') return { ...cfg, embed: null, store: null, channels: [] };
+  const channels = await kbIndex.warm(policy.all().map((p) => p.channel));
+  let info = null; try { info = embed.info(); } catch { /* 설정 오류는 채널별 error에 있다 */ }
+  return { ...cfg, embed: info, store: process.env.VECTOR_STORE || 'memory', channels };
+}
 
 /** 시크릿 비교는 상수 시간. */
 function same(got, want) {
@@ -89,6 +100,13 @@ function preflight(env = process.env) {
   for (const k of ['RETENTION_DAYS', 'LLM_DAILY_TOKEN_BUDGET']) {
     if (env[k] && !/^[1-9]\d*$/.test(env[k])) errors.push(`${k}=${env[k]} — 비우거나 1 이상의 정수.`);
   }
+  // 접수 Agent RAG(KB_MODE=rag). 이번 단계의 임베딩·저장소는 mock·memory뿐이다
+  if (env.KB_MODE && !['full', 'rag'].includes(env.KB_MODE)) errors.push(`KB_MODE=${env.KB_MODE} — 비우거나 full | rag.`);
+  if (env.KB_TOPK && !(/^[1-9]\d*$/.test(env.KB_TOPK) && Number(env.KB_TOPK) <= kbIndex.TOPK_MAX)) errors.push(`KB_TOPK=${env.KB_TOPK} — 비우거나 1~${kbIndex.TOPK_MAX} 정수.`);
+  if (env.KB_TRIAGE_TOC && !['0', '1'].includes(env.KB_TRIAGE_TOC)) errors.push(`KB_TRIAGE_TOC=${env.KB_TRIAGE_TOC} — 비우거나 0 | 1.`);
+  if (env.EMBED_PROVIDER && !embed.PROVIDERS[env.EMBED_PROVIDER]) errors.push(`EMBED_PROVIDER=${env.EMBED_PROVIDER} — 비우거나 ${Object.keys(embed.PROVIDERS).join(' | ')}.`);
+  if (env.VECTOR_STORE && !vectorStore.STORES[env.VECTOR_STORE]) errors.push(`VECTOR_STORE=${env.VECTOR_STORE} — 비우거나 ${Object.keys(vectorStore.STORES).join(' | ')}.`);
+  if (prod && env.KB_MODE === 'rag') warnings.push('KB_MODE=rag — 임베딩은 mock, 벡터 저장소는 memory(시험용)입니다.');
   // 자동 메일이 실제로 나가는 설정(smtp + 자동 발송 켬)에서만 — 꺼져 있으면 인증과 무관하게 자동 메일이 없다
   if (env.MAIL_PROVIDER === 'smtp' && policy.autoSendOn(env) && !policy.requireSenderAuth(env)) warnings.push('MAIL_PROVIDER=smtp인데 REQUIRE_SENDER_AUTH가 꺼져 있다 — 인증 결과 없는 메일에도 자동 메일이 나갑니다.');
   if (prod && (env.LLM_PROVIDER || (env.ANTHROPIC_API_KEY ? 'anthropic' : 'mock')) === 'anthropic' && !env.LLM_DAILY_TOKEN_BUDGET) warnings.push('일일 토큰 예산이 없습니다(LLM_DAILY_TOKEN_BUDGET) — LLM 비용 상한 없음.');
@@ -274,6 +292,8 @@ const CORE = [
   }],
   ['POST', /^\/api\/inbound$/, (_m, _q, b) => inbound(b, !!process.env.INBOUND_SECRET)],
   ['POST', /^\/api\/test\/inbound$/, (_m, _q, b) => (testInjectOn() ? inbound(b, false, true) : fail(404, 'not found'))],
+  // 평가 실행기용: 접수 Agent KB 설정과(rag면) 미리 색인 결과 — 질문→답변 시간에 색인 시간이 섞이지 않게 실행 전에 부른다
+  ['POST', /^\/api\/test\/kb-index$/, async () => (testInjectOn() ? kbIndexStatus() : fail(404, 'not found'))],
   ['POST', /^\/api\/drafts\/([^/]+)\/approve$/, (m, _q, b) => loop.approveDraft(m[1], by(b))],
   ['POST', /^\/api\/drafts\/([^/]+)\/discard$/, (m, _q, b) => loop.discardDraft(m[1], by(b))],
   ['POST', /^\/api\/drafts\/([^/]+)\/rate$/, (m, _q, b) => loop.rateShadow(m[1], by(b))],
@@ -419,6 +439,7 @@ if (require.main === module) {
   // 기본은 이 컴퓨터에서만. 컨테이너는 이미지가 HOST=0.0.0.0을 준다.
   createServer().listen(port, process.env.HOST || '127.0.0.1', () => {
     console.log(`cs-agent http://localhost:${port}  llm=${llm.name()} mail=${mail.name()} auto_send=${policy.autoSendOn() ? 'on' : 'off'} sender_auth=${senderAuthMode()} retention=${retention.days() ?? 'off'} budget=${tokenBudget() ?? 'none'} db=${process.env.DB_PATH || 'data/cs-agent.db'}`);
+    if (kbIndex.config().mode === 'rag') kbIndexStatus().then((s) => console.log(`[kb-index] 미리 색인 ${s.channels.map((c) => `${c.channel}:${c.error || `${c.embedded}/${c.embedded + c.kept} ${c.ms}ms`}`).join(' ')}`), (e) => console.error('[kb-index]', e));
     recover().catch((e) => console.error('[recover]', e));
     require('./sweeper').start();
     require('./notify').start();
