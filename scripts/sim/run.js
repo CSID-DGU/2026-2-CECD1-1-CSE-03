@@ -18,6 +18,7 @@ const perf = require('./perf');
 const scenarios = require('./scenarios');
 const customer = require('./customer');
 const simLlm = require('./llm');
+const embedBedrock = require('../../server/embed-bedrock');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const BUSINESS_DATA = path.join(ROOT, 'server', 'mock', 'business-data.json');
@@ -100,6 +101,15 @@ function parseArgs(argv = [], env = process.env) {
   return o;
 }
 
+/**
+ * 임베딩 공급자 오리진 — KB_MODE=rag이고 EMBED_PROVIDER=bedrock-cohere일 때만 설정 리전의 bedrock-runtime 하나(LLM이 mock이어도).
+ * 설정이 틀리면(차원 등) 더하지 않는다 — 시작 검사가 거부한다. EC2 IMDS는 열지 않는다(실행기는 env 자격 증명만).
+ */
+function embedOrigins(env = process.env) {
+  if (String(env.KB_MODE ?? '').trim() !== 'rag' || String(env.EMBED_PROVIDER ?? '').trim() !== embedBedrock.NAME) return [];
+  try { return [embedBedrock.endpoint(embedBedrock.settings(env).region)]; } catch { return []; }
+}
+
 const realFetch = globalThis.fetch;
 const allowed = new Set(); // fetch가 통과시키는 오리진: 자기 서버(기동 때 더함) + 실제 공급자 API
 const serverTokens = new Map(); // 자기 서버 오리진 → 실행마다 새 토큰. fetch가 그 오리진 요청에만 x-sim-token으로 붙인다
@@ -124,6 +134,7 @@ function lockDown(o) {
   allowed.clear();
   billed = 0;
   if (o.provider === 'anthropic') allowed.add(ANTHROPIC_ORIGIN);
+  for (const x of embedOrigins(process.env)) allowed.add(x);
   // 요청은 한 번만 해석해 그 객체를 보낸다. 리다이렉트는 따라가지 않는다. 거부는 reject로
   globalThis.fetch = async (input, init) => {
     const req = new Request(input, init);
@@ -686,7 +697,7 @@ async function runMain(argv) {
   return summary.partial ? 3 : 0;
 }
 
-module.exports = { parseArgs, lockDown, boot, caseDetail, runScenario, relabelLog, judgeLog, estimate, main };
+module.exports = { parseArgs, lockDown, embedOrigins, boot, caseDetail, runScenario, relabelLog, judgeLog, estimate, main };
 
 // 예상 밖 오류도 설정 실패와 같은 2로 끝낸다(1은 치명 있음). 산출을 다 쓴 뒤 바로 끝내 남은 회차가 되돌린 fetch로 돌지 않게 한다
 if (require.main === module) main().then((c) => process.exit(c), (e) => { console.error(e); process.exit(2); });

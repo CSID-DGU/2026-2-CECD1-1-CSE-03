@@ -266,6 +266,7 @@ function toMarkdown(s, cmp = null, config = null) {
       `- KB 절 수: ${Object.entries(config.kbSections).map(([c, n]) => `${c} ${n}`).join(', ')}`);
     if (config.kbMode === 'rag') {
       L.push(`- 임베딩 ${config.embed ? `${config.embed.provider}/${config.embed.model} ${config.embed.dim}차원` : '-'} · 저장소 ${config.vectorStore ?? '-'}`,
+        `- 임베딩 리전/추론 방식: ${config.embed?.region ? `${config.embed.region}, ${config.embed.inference ?? '-'}` : '-'}${config.embed?.inference === 'global' ? ' (요청이 다른 리전에서 처리될 수 있음 — 임베딩 시간에 네트워크 왕복 포함)' : ''}`,
         `- 미리 색인(질문→답변 시간과 별도): ${asList(config.index).map((c) => (c.error ? `${c.channel} 실패(${c.error})` : `${c.channel} ${c.embedded}/${c.embedded + c.kept}절 ${c.ms}ms`)).join(', ') || '-'}`);
     }
     L.push(

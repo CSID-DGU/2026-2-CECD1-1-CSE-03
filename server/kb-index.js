@@ -84,8 +84,9 @@ async function retrieve({ channel, kb, query, topK = config().topK }) {
   if (!hits.length) forget(fail('no_hits'));
   return {
     topK, hits, kbVersion: kb.version, kbLanguage: kb.language, kbKeys: Object.keys(kb.sections),
-    embed: { provider: idx.provider, model: idx.model, dim: idx.dim }, store: idx.store,
-    ms: { index: idx.ms, embed: t2 - t1, search: t3 - t2 }, index: { embedded: idx.embedded, kept: idx.kept, removed: idx.removed, skipped: !!idx.skipped },
+    embed: { provider: idx.provider, model: idx.model, dim: idx.dim, ...(info.region ? { region: info.region, inference: info.inference } : {}) }, store: idx.store,
+    // embed = 공급자 호출 시간(embed가 잰 값 — 원격이면 네트워크 왕복 포함)
+    ms: { index: idx.ms, embed: Number.isFinite(q.ms) ? q.ms : t2 - t1, search: t3 - t2 }, index: { embedded: idx.embedded, kept: idx.kept, removed: idx.removed, skipped: !!idx.skipped },
   };
 }
 

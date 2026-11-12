@@ -40,7 +40,11 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `KB_MODE` (full) | `server/kb-index.js` `server/loop.js` `server/index.js` | 접수 Agent가 받는 지식베이스. `full`은 KB 전체(기존 동작). `rag`는 가린 문의 제목·본문을 회차마다 한 번 임베딩해 가까운 절 `KB_TOPK`개 본문(+목차)만 접수 Agent에게 준다. 답장·검수·인계·툴·guard·판단 기록의 `kb_version`은 늘 전체 KB. 검색이 안 되면 그 회차는 full로 돌고 판단 기록 `retrieve` 단계에 폴백 사유가 남는다. 다른 값이면 시작 거부 |
 | `KB_TOPK` (5) | `server/kb-index.js` | rag에서 고를 절 수(1~50). 절이 그보다 적으면 전부. 범위 밖이면 시작 거부 |
 | `KB_TRIAGE_TOC` (1) | `server/kb-index.js` | rag에서 목차(모든 절의 키·제목)도 줄지. `0`이면 고른 절 본문만 |
-| `EMBED_PROVIDER` (mock) | `server/embed.js` | rag 임베딩 공급자. 지금은 `mock`(글자 2-gram 해시, 256차원, 네트워크 없음 — 이번 단계와 테스트용)뿐. Bedrock Cohere Embed v4(1536차원)는 다음 단계 |
+| `EMBED_PROVIDER` (mock) | `server/embed.js` `server/index.js` | rag 임베딩 공급자. `mock`(글자 2-gram 해시, 256차원, 네트워크 없음 — 테스트용) · `bedrock-cohere`(Amazon Bedrock Cohere Embed v4, `server/embed-bedrock.js` — 아래 "Bedrock 임베딩"). 다른 값이면 시작 거부. `bedrock-cohere` 인데 `AWS_ACCESS_KEY_ID`·`AWS_SECRET_ACCESS_KEY` 가 없으면 기동 경고(EC2 역할일 수 있어 거부하지 않는다). 호출 오류는 회차마다 full 로 폴백하고 `retrieve` 사유가 남는다: `embed_auth`(401·403·자격 증명 없음) · `embed_throttled`(429 를 0.5초·1.5초 쉬고 두 번 더 보내도 실패) · `embed_timeout` · `embed_invalid`(개수·차원·NaN·영벡터) · `embed_error`(그 밖) |
+| `BEDROCK_EMBED_MODEL` (`global.cohere.embed-v4:0`) | `server/embed-bedrock.js` | bedrock-cohere 모델 ID(InvokeModel 경로에 들어간다). 접두어 `global.` 은 Global 교차 리전 추론 프로필 |
+| `BEDROCK_EMBED_DIM` (1536) | `server/embed-bedrock.js` `server/index.js` | bedrock-cohere `output_dimension`. `256` `512` `1024` `1536` 밖이면 시작 거부. 공급자 모델 식별자가 `<모델 ID>@<차원>`(예 `global.cohere.embed-v4:0@1536`)이라 차원을 바꾸면 다른 색인이 된다 |
+| `BEDROCK_REGION` (`AWS_REGION`) | `server/embed-bedrock.js` `server/index.js` `scripts/sim/run.js` | bedrock-cohere 호출·서명 리전(`https://bedrock-runtime.<리전>.amazonaws.com`, 서명 서비스 `bedrock`). 비우면 `AWS_REGION`. SES 리전과 따로 둘 때 쓴다. 리전 이름 형식이 아니면 시작 거부 |
+| `EMBED_TIMEOUT_MS` (10000) | `server/embed-bedrock.js` `server/index.js` | 임베딩 호출 한 번의 시간 제한. 넘으면 `embed_timeout` 으로 폴백. 1 이상 정수가 아니면 시작 거부 |
 | `VECTOR_STORE` (memory) | `server/vector-store.js` `server/vector-store-pg.js` | rag 벡터 저장소. `memory`(프로세스 메모리 — 테스트용, 기동 때 다시 색인) · `pgvector`(PostgreSQL + pgvector. KB 절 벡터만 두고 문의·결정·발송 같은 운영 데이터는 그대로 SQLite). pgvector는 표 `kb_vectors`(PK channel·language·model·key, 차원 없는 `vector` 열을 `dim` 열로 거름)를 기동 뒤 첫 색인 때 만들고(`CREATE EXTENSION IF NOT EXISTS vector` 권한 필요), 색인 없이 정확 검색(`<#>` 내적 = 코사인)한다. 다른 값이면 시작 거부 |
 | `PGVECTOR_URL` (없음) | `server/vector-store-pg.js` `server/index.js` | `VECTOR_STORE=pgvector` 접속 주소 `postgresql://<사용자>:<비밀번호>@<호스트>:<포트>/<DB>`. 접속 3초·질의 5초 제한. `KB_MODE=rag` + pgvector 인데 비어 있으면 시작 거부, 형식이 아니면 시작 거부(값은 로그에 남기지 않는다). `KB_MODE=full` 이면 접속하지 않는다. 접속이 안 되면 기동은 되고 경고를 남기며 회차마다 full 로 폴백(`retrieve` 사유 `store_error`). 평가 실행기(`sim:eval`)는 rag 미리 색인이 실패하면 돌리지 않는다(exit 2) |
 | `LLM_RETRY_SCALE` (1) | `server/loop.js` `server/llm/index.js` | 장애 재시도 간격(2·5·10·30분)과 차단기 열림 시간(60초)의 배수. 테스트에서 줄인다 |
@@ -105,6 +109,46 @@ docker rm cs-pgvector
 ```
 
 저장소 계약 테스트는 `PGVECTOR_URL` 이 있으면 pgvector 에도 돈다(임시 스키마를 만들고 끝나면 지운다). 없으면 pgvector 몫은 건너뛴다. 컨테이너 이미지(`Dockerfile`)는 `npm install` 을 하지 않아 `pg` 패키지가 없다 — 컨테이너에서 pgvector 를 쓰려면 이미지에 의존성 설치를 더해야 한다.
+
+### Bedrock 임베딩 (EMBED_PROVIDER=bedrock-cohere)
+
+KB 절(document)과 고객 문의(query)를 Amazon Bedrock Cohere Embed v4 로 임베딩한다. AWS SDK 없이 `server/aws.js`(SigV4 서명·자격 증명)로 `POST /model/<모델 ID>/invoke` 를 부른다. 본문은 `{ texts, input_type: search_document | search_query, embedding_types: ["float"], output_dimension }`, 한 요청에 문장 96개까지(Bedrock Cohere Embed v4 상한) 나눠 보낸다. 키·세션 토큰·Authorization 은 로그·오류·결과 파일에 남기지 않는다.
+
+이 레포는 `.env` 를 자동으로 읽지 않는다. Windows PowerShell 에서는 `node --env-file=.env` 로 실행한다.
+
+```powershell
+node --env-file=.env scripts/embed-check.js      # 공급자·모델·차원·리전·호출 시간, 질문 3개 → 가장 가까운 KB 절과 유사도
+node --env-file=.env --no-warnings=ExperimentalWarning server/index.js   # KB_MODE=rag, EMBED_PROVIDER=bedrock-cohere 를 .env 에 넣고
+```
+
+- **리전**: 무료 플랜 개발 계정은 리전이 시드니(`ap-southeast-2`)로 고정이라 `BEDROCK_REGION=ap-southeast-2`. 모델은 Global 교차 리전 추론 ID `global.cohere.embed-v4:0` 으로 부른다 — 요청이 다른 리전에서 처리될 수 있고, 측정한 임베딩 시간(`retrieve` 의 `ms.embed`)에는 그 네트워크 왕복이 들어간다. 평가 요약은 "임베딩 리전/추론 방식"(예 `ap-southeast-2, global`)을 같이 적는다.
+- **IAM 권한** (개발 사용자·EC2 인스턴스 역할 공통, 계정 ID 는 자기 것):
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "bedrock:InvokeModel",
+    "Resource": [
+      "arn:aws:bedrock:ap-southeast-2:<계정 ID>:inference-profile/global.cohere.embed-v4:0",
+      "arn:aws:bedrock:*::foundation-model/cohere.embed-v4:0"
+    ]
+  }]
+}
+```
+
+- **배포(EC2)**: `AWS_ACCESS_KEY_ID`·`AWS_SECRET_ACCESS_KEY` 는 비우고 인스턴스 역할에 같은 권한을 준다(IMDSv2 로 임시 자격 증명). Cohere 는 Marketplace 모델이라 계정마다 첫 호출 때 구독이 생긴다 — 그 첫 호출에는 `aws-marketplace:Subscribe` 등 구독 권한이 필요할 수 있으니 콘솔·CloudShell 에서 한 번 불러 두고 서버 역할에는 `bedrock:InvokeModel` 만 준다.
+- **평가 실행기**(`sim:eval`)는 `KB_MODE=rag` + `EMBED_PROVIDER=bedrock-cohere` 일 때만 설정 리전의 `bedrock-runtime` 오리진 하나를 네트워크 허용 목록에 더한다(LLM 이 mock 이어도 — 실제 임베딩 + mock LLM 으로 검색 정확도를 싸게 잰다). EC2 IMDS 는 열지 않아 실행기는 env 자격 증명만 쓴다. 결과 설정(`perfConfig.embed`)에 공급자·모델·차원·리전·추론 방식이 남는다.
+
+```powershell
+# rag + Bedrock + pgvector + mock LLM, v2 dev
+$env:KB_MODE='rag'; $env:EMBED_PROVIDER='bedrock-cohere'; $env:VECTOR_STORE='pgvector'
+node --env-file=.env --no-warnings=ExperimentalWarning scripts/sim/run.js --provider=mock --set=v2 --split=dev
+# 같은 조건 full(KB 전체) — 비교 기준. --env-file 은 이미 있는 환경 변수를 덮지 않는다(쉘 값이 이긴다) — .env 에 KB_MODE=rag 가 있어도 full 로 돈다
+$env:KB_MODE='full'
+node --env-file=.env --no-warnings=ExperimentalWarning scripts/sim/run.js --provider=mock --set=v2 --split=dev
+```
 
 ### 실 LLM 스모크 실행
 
