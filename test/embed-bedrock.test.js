@@ -14,8 +14,14 @@ globalThis.fetch = async (input, init) => {
   const body = req.method === 'GET' ? '' : await req.text();
   calls.push({ url: req.url, method: req.method, headers: Object.fromEntries(req.headers), body });
   if (!handler) throw new Error('네트워크 없음(시험)');
-  return handler({ url: req.url, body, signal: req.signal });
+  // 호출자가 준 신호를 그대로 넘긴다. new Request가 만든 신호는 원래 신호를 약한 참조로 따라가서, GC 뒤에는 abort가 전달되지 않아 시간 초과 시험이 멈출 수 있다
+  return handler({ url: req.url, body, signal: init?.signal ?? req.signal });
 };
+// 시간 초과 흉내: 응답하지 않다가 abort가 오면 그 이유로 실패한다(이미 abort됐으면 바로)
+const hang = ({ signal }) => new Promise((_, no) => {
+  if (signal.aborted) return no(signal.reason);
+  signal.addEventListener('abort', () => no(signal.reason), { once: true });
+});
 
 const db = require('../server/db');
 const llm = require('../server/llm');
@@ -117,7 +123,7 @@ test('오류 코드: 403 → embed_auth, 429 두 번 다시 보내도 → embed_
   assert.equal(calls.length, 3);
   calls.length = 0;
   process.env.EMBED_TIMEOUT_MS = '30';
-  handler = ({ signal }) => new Promise((_, no) => signal.addEventListener('abort', () => no(signal.reason)));
+  handler = hang;
   await assert.rejects(make().raw(['a'], 'query'), { code: 'embed_timeout' });
   assert.equal(calls.length, 1, '시간 초과는 다시 보내지 않는다');
   handler = () => json(500, { message: 'internal' }, { 'x-amzn-errortype': 'InternalServerException' });
@@ -152,7 +158,7 @@ test('rag 회차: Bedrock 403·시간 초과면 full로 폴백하고 retrieve �
   try {
     for (const [reason, h, extra] of [
       ['embed_auth', () => json(403, { message: 'denied' }, { 'x-amzn-errortype': 'AccessDeniedException' }), {}],
-      ['embed_timeout', ({ signal }) => new Promise((_, no) => signal.addEventListener('abort', () => no(signal.reason))), { EMBED_TIMEOUT_MS: '20' }],
+      ['embed_timeout', hang, { EMBED_TIMEOUT_MS: '20' }],
     ]) {
       setEnv({ ...BASE, KB_MODE: 'rag', ...extra });
       vstore.use(null);
