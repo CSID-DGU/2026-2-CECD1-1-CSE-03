@@ -336,3 +336,42 @@ test('담당자 빈 시간 툴: 날짜를 허용하는 채널에서만 보이고
     }
   } finally { delete process.env.BUSINESS_DATA_FILE; }
 });
+
+test('조회 근거: tool:<이름>은 근거로 댈 수 있는 조회 중 이번에 성공한 것만 받고, 검수 Agent는 그 결과를 근거로 보고, 접수 Agent는 쓸 수 있는 조회를 안다', () => {
+  const path = require('node:path');
+  const tools = require('../server/agents/tools');
+  const guard = require('../server/guard');
+  const reviewer = require('../server/agents/reviewer');
+  const triage = require('../server/agents/triage');
+  const pack = require('../server/policy').load('support'); const kb = require('../server/kb').load('support');
+  const ctx = (auth = 'pass') => ({ caseId: 'x', case: { customer_email: 'sumin.lee@example.com', known_facts: '{}' }, rawMessage: { sender: 'sumin.lee@example.com', sender_auth: auth, body_clean: '계정이 잠겼어요' },
+    message: { body_clean: '계정이 잠겼어요' }, history: [], recentDecisions: [], knownFacts: {}, rounds: 0, pack, kb, triage: { intent: 'login_issue' } });
+  const body = '고객님 계정은 지금 잠겨 있습니다.';
+  // 검사기: 근거 조회 목록 밖(지난 케이스 등 맥락 툴)은 없는 근거다
+  const codes = (u) => guard.check({ body, usedFacts: u, pack, kb }).map((h) => h.code);
+  assert.ok(!codes(['tool:lookup_account']).includes('unknown_fact'));
+  assert.ok(codes(['tool:search_past_cases']).includes('unknown_fact'));
+  const lookupLine = /답장 단계에서 이 고객의 다음 조회/;
+  process.env.BUSINESS_DATA_FILE = path.join(__dirname, '..', 'server', 'mock', 'business-data.json');
+  try {
+    const enumOf = (c) => tools.defs(c).find((d) => d.name === 'submit_draft').input_schema.properties.usedFacts.items.enum;
+    assert.ok(enumOf(ctx()).includes('tool:lookup_account') && !enumOf(ctx()).includes('tool:search_past_cases'));
+    assert.ok(!enumOf(ctx(null)).some((k) => k.startsWith('tool:')), '인증이 없으면 조회 근거도 없다');
+    // 이번 사이클에 부르지 않은 조회는 근거로 받지 않는다
+    const run = tools.runner(ctx());
+    const notRead = () => (JSON.parse(run.run('check_draft', { body, usedFacts: ['tool:lookup_account'] }).content).violations || []).some((v) => v.code === 'fact_not_read');
+    assert.ok(notRead());
+    run.run('lookup_account', {});
+    assert.ok(!notRead());
+    // 검수: 근거로 댄 조회를 다시 불러 근거 블록에 넣는다. 근거가 조회뿐이면 지식베이스 전체를 보여 주지 않는다
+    const u = reviewer.user({ ...ctx(), body, usedFacts: ['tool:lookup_account'], humanCommitments: [] });
+    assert.match(u, /<<<TOOLS\n\[tool:lookup_account\]\n\{"found":true,.*"login":\{"locked":true/);
+    assert.match(u, /<<<KB\n\(없음\)\nKB>>>/);
+    assert.ok(!reviewer.user({ ...ctx(), body, usedFacts: [], humanCommitments: [] }).includes('<<<TOOLS'), '조회 근거가 없으면 블록도 없다');
+    // 접수: 이 고객에게 보이는 조회만 알린다
+    assert.match(triage.user(ctx()), lookupLine);
+    assert.match(triage.user(ctx()), /계정 상태/);
+    assert.doesNotMatch(triage.user(ctx(null)), lookupLine);
+  } finally { delete process.env.BUSINESS_DATA_FILE; }
+  assert.doesNotMatch(triage.user(ctx()), lookupLine, '업무 데이터가 없으면 알리지 않는다');
+});

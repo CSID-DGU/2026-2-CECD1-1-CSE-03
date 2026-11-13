@@ -5,7 +5,7 @@ const events = require('./events');
 const policy = require('./policy');
 const kbLoader = require('./kb');
 const mail = require('./mail');
-const { CONTACT_RE } = require('./guard');
+const { CONTACT_RE, isToolFact } = require('./guard');
 const prefilter = require('./prefilter');
 const collections = require('./collections');
 
@@ -198,7 +198,7 @@ function getCase(id) {
       // 승인 화면: 실제로 나갈 메일 전체 + 근거 KB 문장
       const kb = kbLoader.load(c.channel, mail.langOf(d.original_body));
       d.preview = mail.renderAgent({ name: c.customer_name, body: d.original_body });
-      d.kbPassages = Object.fromEntries((d.used_facts || []).map((k) => [k, kb.sections[k]?.text ?? '(KB에 없음 — 기한 지남 또는 삭제)']));
+      d.kbPassages = Object.fromEntries((d.used_facts || []).map((k) => [k, kb.sections[k]?.text ?? (isToolFact(k) ? '(고객사 시스템 조회 결과 — 이 고객의 상태·일정)' : '(KB에 없음 — 기한 지남 또는 삭제)')]));
     }
     if (d.status === 'SENDING' && d.approved_at && Date.parse(d.approved_at) < old) d.needs_send_check = true;
     return d;

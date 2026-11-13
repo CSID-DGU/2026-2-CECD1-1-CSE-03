@@ -122,6 +122,11 @@ const trimUrl = (u) => u.replace(/[.,<>"')\]]+$/, '');
 const linkKey = (u) => trimUrl(u).replace(/^https?:\/\//i, '').replace(/^www\./i, '');
 // KB 문장(20자 이상) — intent를 모를 때 "KB를 옮겨 놓고 근거를 비운" 본문을 알아보는 데 쓴다.
 const kbSentences = (kb) => Object.values(kb?.sections || {}).flatMap((s) => s.text.split(/(?<=[.!?])\s+/)).map((x) => x.trim()).filter((x) => x.length >= 20);
+// 근거로 댈 수 있는 조회 툴 — 이 고객의 상태·일정 사실. 근거 키는 `tool:<이름>`. 절차·조건은 여전히 지식베이스 절만 근거다.
+// 지난 케이스·고객 기록·공식 사이트는 맥락일 뿐이라 여기 없다.
+const TOOL_FACTS = ['lookup_order', 'lookup_billing', 'lookup_account', 'find_meeting_slots'];
+const isToolFact = (k) => typeof k === 'string' && k.startsWith('tool:') && TOOL_FACTS.includes(k.slice(5));
+
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
@@ -155,7 +160,7 @@ function check({ body, usedFacts = [], pack, kb, intent = null, only = null, hum
   const badUrl = (t.match(LINK_RE) || []).map(trimUrl).find((u) => !kbLinks.has(linkKey(u)));
   if (badUrl) hit('link_not_in_kb', badUrl);
   const facts = Array.isArray(usedFacts) ? usedFacts : [];
-  const unknown = facts.filter((k) => !kb?.sections?.[k]);
+  const unknown = facts.filter((k) => !kb?.sections?.[k] && !isToolFact(k));
   if (unknown.length) hit('unknown_fact', unknown.join(','));
   // 근거는 그 intent에 팩이 허용한 KB 절 안에서만
   const allowed = intent ? pack?.intents?.[intent]?.kb : undefined;
@@ -171,4 +176,4 @@ function check({ body, usedFacts = [], pack, kb, intent = null, only = null, hum
   return hits;
 }
 
-module.exports = { check, maskContacts, maskPii, CONTACT_RE, URL_RE };
+module.exports = { check, maskContacts, maskPii, CONTACT_RE, URL_RE, TOOL_FACTS, isToolFact };

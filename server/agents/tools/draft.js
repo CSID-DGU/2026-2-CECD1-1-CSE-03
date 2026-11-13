@@ -4,17 +4,22 @@ const guard = require('../../guard');
 const { SYSTEM_REASONS } = require('../../policy');
 const { prop, obj, out, sectionKeys } = require('./schema');
 
+// 이 사이클에 보이는 조회 툴 중 근거(tool:<이름>)로 댈 수 있는 것 — 노출 조건은 각 툴 파일이 정한다
+const FACT_GROUPS = [require('./orders'), require('./billing'), require('./account'), require('./meeting')];
+const factTools = (ctx) => FACT_GROUPS.flatMap((g) => g.defs(ctx)).map((d) => d.name).filter((n) => guard.TOOL_FACTS.includes(n));
+
 // 코드가 붙이는 사유(llm_error·round_limit·discarded 등)는 모델이 고르지 못하게 뺀다. 모델이 판단할 수 있는 시스템 사유만 남긴다.
 const MODEL_SYSTEM_REASONS = ['out_of_knowledge', 'unclear', 'low_confidence', 'language_unsupported', 'guard_failed'];
 const modelReasons = (pack) => pack.handoffReasons.filter((r) => !SYSTEM_REASONS.includes(r) || MODEL_SYSTEM_REASONS.includes(r));
 
 function defs(ctx) {
-  const usedFacts = sectionKeys(ctx, '본문에 실제로 쓴 사실의 지식베이스 절 키. 이번 사이클에 읽은 절만 넣는다. 사실 없이 인사·감사만 하는 답이면 빈 배열.');
+  const tf = factTools(ctx);
+  const usedFacts = sectionKeys(ctx, `본문에 실제로 쓴 사실의 근거. 지식베이스 절 키는 이번 사이클에 읽은 절만 넣는다.${tf.length ? ' 이 고객의 주문·결제·계정 상태나 미팅 후보 일정을 본문에 썼으면 그 조회의 tool:<툴 이름>도 넣는다(이번 사이클에 부른 조회만).' : ''} 사실 없이 인사·감사만 하는 답이면 빈 배열.`, tf.map((n) => `tool:${n}`));
   const body = prop('string', '고객에게 보낼 본문 전체(인사부터 끝맺음까지). 고객의 언어로 쓴다.');
   return [{
     name: 'check_draft',
     strict: true,
-    description: '초안을 코드 검사기로 검사하고 위반 목록을 돌려준다: 금액·날짜 약속·연락처·지식베이스에 없는 링크·금지어·길이·이모지·빈 자리표시·근거 절(없는 절, 이 문의 유형에 허용되지 않은 절, 이번에 읽지 않은 절). 초안을 다 쓴 뒤 내기 전에 쓴다. 위반이 있으면 지적 전부를 고쳐 다시 검사한다. 문체·사실 정확성은 보지 않는다(그건 뒤의 검수 단계).',
+    description: '초안을 코드 검사기로 검사하고 위반 목록을 돌려준다: 금액·날짜 약속·연락처·지식베이스에 없는 링크·금지어·길이·이모지·빈 자리표시·근거(없는 절, 이 문의 유형에 허용되지 않은 절, 이번에 읽지 않은 절, 이번에 부르지 않은 조회). 초안을 다 쓴 뒤 내기 전에 쓴다. 위반이 있으면 지적 전부를 고쳐 다시 검사한다. 문체·사실 정확성은 보지 않는다(그건 뒤의 검수 단계).',
     input_schema: obj({ body, usedFacts }),
   }, {
     name: 'submit_draft',
@@ -32,8 +37,9 @@ function defs(ctx) {
 function handlers(ctx, state) {
   const violations = ({ body, usedFacts }) => {
     const v = guard.check({ body, usedFacts, pack: ctx.pack, kb: ctx.kb, intent: ctx.triage?.intent });
-    const unread = (usedFacts || []).filter((k) => ctx.kb?.sections?.[k] && !state.read.has(k));
-    if (unread.length) v.push({ code: 'fact_not_read', quote: unread.join(',') }); // 읽지 않은 절을 근거로 댔다
+    const unread = (usedFacts || []).filter((k) => (ctx.kb?.sections?.[k] && !state.read.has(k))
+      || (guard.isToolFact(k) && !state.called?.has(k.slice(5))));
+    if (unread.length) v.push({ code: 'fact_not_read', quote: unread.join(',') }); // 읽지 않은 절·부르지 않은 조회를 근거로 댔다
     return v;
   };
   const fix = (v) => (v.length ? { violations: v, next: '지적 전부를 고친 본문으로 다시 검사하거나 낸다. 고칠 수 없으면 사람에게 넘긴다.' } : {});
@@ -58,4 +64,4 @@ function handlers(ctx, state) {
   };
 }
 
-module.exports = { defs, handlers, modelReasons };
+module.exports = { defs, handlers, modelReasons, factTools };
