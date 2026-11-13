@@ -19,6 +19,10 @@ const store = require('./store');
 const crm = require('./crm');
 const guard = require('./guard');
 const configConsole = require('./console');
+const kbIndex = require('./kb-index');
+const embed = require('./embed');
+const embedBedrock = require('./embed-bedrock');
+const vectorStore = require('./vector-store');
 const pkg = require('../package.json');
 
 const { HttpError } = cases;
@@ -44,6 +48,14 @@ const testInjectOn = () => process.env.ENABLE_TEST_INJECT === '1' || (process.en
 const mailWarning = () => (process.env.NODE_ENV === 'production' && mail.name() === 'mock' ? 'mock — 실제 발송 안 됨' : undefined);
 const senderAuthMode = () => (policy.requireSenderAuth() ? 'required' : 'optional');
 const tokenBudget = () => Number(process.env.LLM_DAILY_TOKEN_BUDGET) || null; // 형식은 시작 검사가 본다
+/** 접수 Agent KB 설정 + rag면 채널마다 미리 색인(이미 맞으면 다시 임베딩하지 않는다). full이면 색인하지 않는다. */
+async function kbIndexStatus() {
+  const cfg = kbIndex.config();
+  if (cfg.mode !== 'rag') return { ...cfg, embed: null, store: null, channels: [] };
+  const channels = await kbIndex.warm(policy.all().map((p) => p.channel));
+  let info = null; try { info = embed.info(); } catch { /* 설정 오류는 채널별 error에 있다 */ }
+  return { ...cfg, embed: info, store: process.env.VECTOR_STORE || 'memory', channels };
+}
 
 /** 시크릿 비교는 상수 시간. */
 function same(got, want) {
@@ -86,9 +98,27 @@ function preflight(env = process.env) {
     if (policy.autoSendOn(env)) errors.push('IMAP_MODE=mirror인데 AUTO_SEND가 켜져 있다. AUTO_SEND=0.');
     if (!policy.shadowEnv(env).includes(ch)) errors.push(`IMAP_MODE=mirror인데 SHADOW_CHANNELS에 ${ch}(IMAP_CHANNEL)가 없다.`);
   }
-  for (const k of ['RETENTION_DAYS', 'LLM_DAILY_TOKEN_BUDGET']) {
+  for (const k of ['RETENTION_DAYS', 'LLM_DAILY_TOKEN_BUDGET', 'EMBED_TIMEOUT_MS']) {
     if (env[k] && !/^[1-9]\d*$/.test(env[k])) errors.push(`${k}=${env[k]} — 비우거나 1 이상의 정수.`);
   }
+  // 접수 Agent RAG(KB_MODE=rag). 임베딩은 mock | bedrock-cohere, 저장소는 memory | pgvector(PGVECTOR_URL). 접속 확인은 기동 뒤 미리 색인이 한다(여기서는 형식만)
+  if (env.KB_MODE && !['full', 'rag'].includes(env.KB_MODE)) errors.push(`KB_MODE=${env.KB_MODE} — 비우거나 full | rag.`);
+  if (env.KB_TOPK && !(/^[1-9]\d*$/.test(env.KB_TOPK) && Number(env.KB_TOPK) <= kbIndex.TOPK_MAX)) errors.push(`KB_TOPK=${env.KB_TOPK} — 비우거나 1~${kbIndex.TOPK_MAX} 정수.`);
+  if (env.KB_TRIAGE_TOC && !['0', '1'].includes(env.KB_TRIAGE_TOC)) errors.push(`KB_TRIAGE_TOC=${env.KB_TRIAGE_TOC} — 비우거나 0 | 1.`);
+  if (env.EMBED_PROVIDER && !embed.PROVIDERS[env.EMBED_PROVIDER]) errors.push(`EMBED_PROVIDER=${env.EMBED_PROVIDER} — 비우거나 ${Object.keys(embed.PROVIDERS).join(' | ')}.`);
+  if (env.BEDROCK_EMBED_DIM && !embedBedrock.DIMS.includes(Number(env.BEDROCK_EMBED_DIM))) errors.push(`BEDROCK_EMBED_DIM=${env.BEDROCK_EMBED_DIM} — 비우거나 ${embedBedrock.DIMS.join(' | ')}.`);
+  if (env.BEDROCK_REGION && !/^[a-z]{2}(-[a-z]+)+-\d+$/.test(env.BEDROCK_REGION)) errors.push(`BEDROCK_REGION=${env.BEDROCK_REGION} — 비우거나 리전 이름(예 ap-southeast-2).`);
+  // 환경 변수 키가 없어도 EC2 인스턴스 역할일 수 있어 거부하지 않는다(값은 출력하지 않는다)
+  const bedrockEmbed = (env.EMBED_PROVIDER || '').trim() === embedBedrock.NAME;
+  if (bedrockEmbed && !(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY)) warnings.push('EMBED_PROVIDER=bedrock-cohere인데 AWS_ACCESS_KEY_ID·AWS_SECRET_ACCESS_KEY가 없다 — EC2 인스턴스 역할(IMDSv2)로 자격 증명을 받는다. 역할도 없으면 회차마다 full로 폴백(embed_auth).');
+  if (bedrockEmbed && env.KB_MODE !== 'rag') warnings.push('EMBED_PROVIDER=bedrock-cohere인데 KB_MODE가 rag가 아니다 — 임베딩을 부르지 않습니다.');
+  if (env.VECTOR_STORE && !vectorStore.STORES[env.VECTOR_STORE]) errors.push(`VECTOR_STORE=${env.VECTOR_STORE} — 비우거나 ${Object.keys(vectorStore.STORES).join(' | ')}.`);
+  const pg = (env.VECTOR_STORE || '').trim() === 'pgvector';
+  const pgUrl = String(env.PGVECTOR_URL || '').trim();
+  if (pgUrl && !/^postgres(ql)?:\/\/\S+$/.test(pgUrl)) errors.push('PGVECTOR_URL 형식이 아니다 — postgresql://<사용자>:<비밀번호>@<호스트>:<포트>/<DB>.'); // 값은 로그에 남기지 않는다
+  if (pg && env.KB_MODE === 'rag' && !pgUrl) errors.push('KB_MODE=rag, VECTOR_STORE=pgvector인데 PGVECTOR_URL이 비어 있다. 접속 주소를 넣거나 VECTOR_STORE를 비운다(memory).');
+  if (pg && env.KB_MODE !== 'rag') warnings.push('VECTOR_STORE=pgvector인데 KB_MODE가 rag가 아니다 — 벡터 저장소에 접속하지 않습니다.');
+  if (prod && env.KB_MODE === 'rag' && (!bedrockEmbed || !pg)) warnings.push(`KB_MODE=rag — 임베딩은 ${bedrockEmbed ? 'bedrock-cohere' : 'mock(시험용)'}, 벡터 저장소는 ${pg ? 'pgvector' : 'memory(시험용)'}입니다.`);
   // 자동 메일이 실제로 나가는 설정(smtp + 자동 발송 켬)에서만 — 꺼져 있으면 인증과 무관하게 자동 메일이 없다
   if (env.MAIL_PROVIDER === 'smtp' && policy.autoSendOn(env) && !policy.requireSenderAuth(env)) warnings.push('MAIL_PROVIDER=smtp인데 REQUIRE_SENDER_AUTH가 꺼져 있다 — 인증 결과 없는 메일에도 자동 메일이 나갑니다.');
   if (prod && (env.LLM_PROVIDER || (env.ANTHROPIC_API_KEY ? 'anthropic' : 'mock')) === 'anthropic' && !env.LLM_DAILY_TOKEN_BUDGET) warnings.push('일일 토큰 예산이 없습니다(LLM_DAILY_TOKEN_BUDGET) — LLM 비용 상한 없음.');
@@ -274,6 +304,8 @@ const CORE = [
   }],
   ['POST', /^\/api\/inbound$/, (_m, _q, b) => inbound(b, !!process.env.INBOUND_SECRET)],
   ['POST', /^\/api\/test\/inbound$/, (_m, _q, b) => (testInjectOn() ? inbound(b, false, true) : fail(404, 'not found'))],
+  // 평가 실행기용: 접수 Agent KB 설정과(rag면) 미리 색인 결과 — 질문→답변 시간에 색인 시간이 섞이지 않게 실행 전에 부른다
+  ['POST', /^\/api\/test\/kb-index$/, async () => (testInjectOn() ? kbIndexStatus() : fail(404, 'not found'))],
   ['POST', /^\/api\/drafts\/([^/]+)\/approve$/, (m, _q, b) => loop.approveDraft(m[1], by(b))],
   ['POST', /^\/api\/drafts\/([^/]+)\/discard$/, (m, _q, b) => loop.discardDraft(m[1], by(b))],
   ['POST', /^\/api\/drafts\/([^/]+)\/rate$/, (m, _q, b) => loop.rateShadow(m[1], by(b))],
@@ -419,6 +451,11 @@ if (require.main === module) {
   // 기본은 이 컴퓨터에서만. 컨테이너는 이미지가 HOST=0.0.0.0을 준다.
   createServer().listen(port, process.env.HOST || '127.0.0.1', () => {
     console.log(`cs-agent http://localhost:${port}  llm=${llm.name()} mail=${mail.name()} auto_send=${policy.autoSendOn() ? 'on' : 'off'} sender_auth=${senderAuthMode()} retention=${retention.days() ?? 'off'} budget=${tokenBudget() ?? 'none'} db=${process.env.DB_PATH || 'data/cs-agent.db'}`);
+    // 저장소 접속 실패(store_error)는 기동을 막지 않는다 — 회차마다 full로 폴백하고 retrieve 단계에 사유가 남는다
+    if (kbIndex.config().mode === 'rag') kbIndexStatus().then((s) => {
+      console.log(`[kb-index] 미리 색인(${s.store}) ${s.channels.map((c) => `${c.channel}:${c.error || `${c.embedded}/${c.embedded + c.kept} ${c.ms}ms`}`).join(' ')}`);
+      if (s.channels.some((c) => c.error)) console.warn(`\n!!! KB_MODE=rag인데 미리 색인 실패(${s.store}) — 고칠 때까지 접수 Agent는 KB 전체(full)로 돈다 !!!\n`);
+    }, (e) => console.error('[kb-index]', e));
     recover().catch((e) => console.error('[recover]', e));
     require('./sweeper').start();
     require('./notify').start();

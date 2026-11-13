@@ -14,9 +14,11 @@ const db = require('../../server/db');
 const policy = require('../../server/policy');
 const kbLoader = require('../../server/kb');
 const grade = require('./grade');
+const perf = require('./perf');
 const scenarios = require('./scenarios');
 const customer = require('./customer');
 const simLlm = require('./llm');
+const embedBedrock = require('../../server/embed-bedrock');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const BUSINESS_DATA = path.join(ROOT, 'server', 'mock', 'business-data.json');
@@ -99,6 +101,15 @@ function parseArgs(argv = [], env = process.env) {
   return o;
 }
 
+/**
+ * 임베딩 공급자 오리진 — KB_MODE=rag이고 EMBED_PROVIDER=bedrock-cohere일 때만 설정 리전의 bedrock-runtime 하나(LLM이 mock이어도).
+ * 설정이 틀리면(차원 등) 더하지 않는다 — 시작 검사가 거부한다. EC2 IMDS는 열지 않는다(실행기는 env 자격 증명만).
+ */
+function embedOrigins(env = process.env) {
+  if (String(env.KB_MODE ?? '').trim() !== 'rag' || String(env.EMBED_PROVIDER ?? '').trim() !== embedBedrock.NAME) return [];
+  try { return [embedBedrock.endpoint(embedBedrock.settings(env).region)]; } catch { return []; }
+}
+
 const realFetch = globalThis.fetch;
 const allowed = new Set(); // fetch가 통과시키는 오리진: 자기 서버(기동 때 더함) + 실제 공급자 API
 const serverTokens = new Map(); // 자기 서버 오리진 → 실행마다 새 토큰. fetch가 그 오리진 요청에만 x-sim-token으로 붙인다
@@ -123,6 +134,7 @@ function lockDown(o) {
   allowed.clear();
   billed = 0;
   if (o.provider === 'anthropic') allowed.add(ANTHROPIC_ORIGIN);
+  for (const x of embedOrigins(process.env)) allowed.add(x);
   // 요청은 한 번만 해석해 그 객체를 보낸다. 리다이렉트는 따라가지 않는다. 거부는 reject로
   globalThis.fetch = async (input, init) => {
     const req = new Request(input, init);
@@ -180,7 +192,7 @@ async function caseDetail(base, caseId, http = (u, i) => fetch(u, i)) {
     case: pick(d.case, ['state', 'responder']),
     messages: d.messages.map((m) => pick(m, ['id', 'direction', 'sent_by', 'body', 'occurred_at', 'provider_message_id'])),
     drafts: d.drafts.map((x) => pick(x, ['id', 'action', 'status', 'approved_by', 'trigger_message_id'])),
-    decisions: d.decisions.map((x) => pick(x, ['message_id', 'step', 'action', 'reason', 'output', 'created_at', 'prompt_version', 'kb_version', 'policy_version'])),
+    decisions: d.decisions.map((x) => pick(x, ['message_id', 'step', 'agent', 'action', 'reason', 'output', 'latency_ms', 'created_at', 'prompt_version', 'kb_version', 'policy_version'])),
     handoffs: d.handoffs.map((h) => pick(h, ['reason'])),
     activities: d.activities.map((x) => pick(x, ['type', 'created_at'])),
   };
@@ -190,6 +202,8 @@ const agentTokens = async (base, http) => {
   const t = (await getJson(http, `${base}/api/report`)).llm.total;
   return { input: t.inputTokens, output: t.outputTokens };
 };
+// 에이전트별 누적(접수·답장) — 턴 앞뒤 차이가 그 회차 몫
+const agentUsage = async (base, http) => perf.usageSnapshot((await getJson(http, `${base}/api/report`)).llm);
 
 // 한 고객 메일의 판단 결과(채점기가 읽는 모양)
 // 이 메일 회차에서 답장 Agent가 성공적으로 부른 툴 이름(부른 순서, 중복 포함). single 방식이면 빈 배열
@@ -213,6 +227,7 @@ function turnOf(d, messageId) {
     draft: d.drafts.filter((x) => x.trigger_message_id === messageId && x.action !== 'ACK').at(-1) ?? null,
     tools: toolsOf(mine),
     activities: d.activities.filter((x) => x.created_at >= at),
+    timing: perf.timingOf(mine, at || null),
   };
 }
 
@@ -250,6 +265,7 @@ async function runScenario({ base, scenario: s, persona, trial = 1, runId, ask, 
     const pointer = pointerNow();
     transcript.push({ who: 'customer', body: mail.body, stepIds: mail.stepIds, opening: n === 1 });
     const a0 = await agentTotal();
+    const u0 = await agentUsage(base, http);
     const t0 = Date.now();
     const msg = {
       channel: s.channel, from: registered ? s.customer.email : `sim+${s.id}-t${trial}@example.com`, name: s.customer.name,
@@ -301,6 +317,7 @@ async function runScenario({ base, scenario: s, persona, trial = 1, runId, ask, 
     log.caseState = d.case.state;
     log.handoffReason = d.handoffs.at(-1)?.reason ?? null;
     turn.tokens.agent = (await agentTotal()) - a0;
+    turn.agentUsage = perf.usageDelta(u0, await agentUsage(base, http));
 
     if (timedOut) { end('timeout'); break; }
     if (turn.approveError) { end('error', 'approve_failed'); break; }
@@ -483,7 +500,7 @@ function prices(env = process.env) {
   return input == null || output == null ? null : { input, output };
 }
 
-function rowsOf(s, trial, log, r, relabels, judgements) {
+function rowsOf(s, trial, log, r, relabels, judgements, { pack = null, config = null } = {}) {
   const rel = new Map(relabels.map((x) => [x.turn, x]));
   const judged = {};
   for (const j of judgements || []) judged[j.turn] = (judged[j.turn] || 0) + j.tokens;
@@ -495,6 +512,9 @@ function rowsOf(s, trial, log, r, relabels, judgements) {
         approvedBy: t.draft?.approved_by ?? null, autoSendFailed: t.autoSendFailed, approveError: t.approveError, tools: t.tools ?? [], toolMatch: g.toolMatch ?? null },
       relabel: x ? { intent: x.intent, level: x.level } : null, outbound: t.outbound, latencyMs: t.latencyMs,
       tokens: { ...t.tokens, judge: judged[i + 1] || 0, relabel: x?.tokens || 0 },
+      perf: perf.turnPerf({ scenario: s, turn: t, graded: g, pack, pass: r.pass, runMode: config?.kbMode ?? 'full' }),
+      config: config && { set: config.set, split: config.split, trial, kbMode: config.kbMode, kbTopK: config.kbTopK, triageToc: config.triageToc,
+        kbSections: config.kbSections[s.channel] ?? null, models: config.models },
     };
   });
   const tokens = turns.reduce((a, t) => a + t.tokens.agent + t.tokens.customer + t.tokens.judge + t.tokens.relabel, 0);
@@ -521,10 +541,13 @@ async function main(argv = process.argv) {
 async function runMain(argv) {
   const o = parseArgs(argv, process.env);
   if (o.error) { console.error(o.error); return 2; }
-  let set; let compare = null;
+  let set; let compare = null; let compareRows = [];
   try {
     set = loadSet(o);
     if (o.compareTo) compare = JSON.parse(scenarios.readChecked(path.join(o.compareTo, 'meta.json')).toString('utf8'));
+    // 회차 기록은 있을 때만 읽는다(meta만 있는 폴더와도 비교는 돈다)
+    const prevTurns = o.compareTo && path.join(o.compareTo, 'turns.jsonl');
+    if (prevTurns && fs.existsSync(prevTurns)) compareRows = scenarios.readChecked(prevTurns).toString('utf8').split('\n').filter((l) => l.trim()).map((l) => JSON.parse(l));
   } catch (e) {
     // 입력 내용(JSON 오류 메시지의 파일 앞부분)을 터미널에 싣지 않는다
     console.error(`거부: 입력을 읽지 못했다 — ${e instanceof SyntaxError ? 'JSON 형식 오류' : (e.code ?? e.message)}`);
@@ -571,6 +594,22 @@ async function runMain(argv) {
   const startedAt = new Date().toISOString();
   const { ask, usage } = simLlm.create({ provider: o.provider, models: o.models });
   const packs = Object.fromEntries(CHANNELS.map((c) => [c, policy.load(c)]));
+  // 접수 Agent 지식베이스 방식(KB_MODE·KB_TOPK·KB_TRIAGE_TOC)은 서버가 읽은 값을 받는다. rag면 이 호출이 미리 색인한다 —
+  // 첫 문의의 질문→답변 시간에 문서 색인 시간이 섞이지 않게(색인 시간은 index에 따로)
+  const kbr = await postJson(http, `${srv.base}/api/test/kb-index`, {});
+  const kbStatus = kbr.ok ? await kbr.json() : { mode: 'full', topK: null, toc: null, embed: null, store: null, channels: [] };
+  // rag인데 미리 색인이 실패했으면(저장소 접속·임베딩 오류) 모든 회차가 full로 폴백해 비교가 무의미하다 — 돌리지 않는다
+  const indexErr = kbStatus.mode === 'rag' ? kbStatus.channels.filter((c) => c.error) : [];
+  if (indexErr.length) {
+    await srv.close();
+    console.error(`거부: KB_MODE=rag인데 미리 색인 실패 (${indexErr.map((c) => `${c.channel}:${c.error}`).join(' ')}) — 저장소(${kbStatus.store})·임베딩 설정을 확인한다.`);
+    return 2;
+  }
+  const perfConfig = {
+    set: set.version, split: o.split, repeat: o.repeat, kbMode: kbStatus.mode, kbTopK: kbStatus.topK, triageToc: kbStatus.toc,
+    embed: kbStatus.embed, vectorStore: kbStatus.store, index: kbStatus.channels,
+    kbSections: Object.fromEntries(CHANNELS.map((c) => [c, Object.keys(kbLoader.load(c).sections).length])), models: o.models,
+  };
   const baseline = set.entry ? {
     policy: CHANNELS.every((c) => packs[c].version === set.entry.policySha256?.[c]),
     kb: CHANNELS.every((c) => kbLoader.load(c).version === set.entry.kbSha256?.[c]),
@@ -606,7 +645,7 @@ async function runMain(argv) {
         let r = grade.applyRelabel(grade.gradeScenario(s, log, { autoSend: o.autoSend, responderMode: mode() }), relabels);
         if (judgements) r = grade.applyJudge(r, judgements);
         results.push(r);
-        const rows = rowsOf(s, trial, log, r, relabels, judgements);
+        const rows = rowsOf(s, trial, log, r, relabels, judgements, { pack: packs[s.channel], config: perfConfig });
         turnRows.push(...rows.turns); resultRows.push(rows.result);
         for (const k of Object.keys(versions)) for (const v of log.versions[k]) versions[k].add(v);
       }
@@ -637,12 +676,16 @@ async function runMain(argv) {
     versions: Object.fromEntries(Object.entries(versions).map(([k, v]) => [k, [...v].sort()])), baseline,
     maxTokens: o.maxTokens, approvedBy: o.approvedBy, startedAt, endedAt: new Date().toISOString(), sim: simHashes(), tokens,
     unsettled, // 기다린 뒤에도 돌던 케이스 수(0이 정상)
+    perfConfig, // 회차 기록의 설정(세트·split·반복·KB 방식·topK·목차·임베딩·저장소·미리 색인 결과·KB 절 수·모델)
   };
   const summary = {
     ...grade.aggregate(results, { workload, usage: usageAll, prices: prices(), meta: comparable(meta), compareMeta: compare && comparable(compare) }),
     partial: results.some((r) => r.ended === 'budget') || unsettled > 0, baseline, tokens,
   };
-  const md = grade.toMarkdown(summary).split('\n');
+  summary.perf = perf.summarize(turnRows);
+  summary.perfCompare = compare ? perf.compareRuns({ meta, rows: turnRows }, { meta: compare, rows: compareRows }) : null;
+  const perfMd = perf.toMarkdown(summary.perf, summary.perfCompare, perfConfig);
+  const md = `${grade.toMarkdown(summary)}\n${perfMd}`.split('\n');
   const notes = [];
   if (results.some((r) => r.ended === 'budget')) notes.push('> 부분 실행: 토큰 상한에 걸려 남은 시행은 budget으로 끝났다.');
   if (unsettled) notes.push(`> 부분 실행: 서버를 닫을 때 아직 돌던 케이스가 ${unsettled}건 있었다. 그 몫은 결과·토큰에 다 들어가지 않았을 수 있다.`);
@@ -659,6 +702,7 @@ async function runMain(argv) {
   await new Promise((r) => setImmediate(r));
   db.get('PRAGMA wal_checkpoint(TRUNCATE)');
 
+  console.log(perfMd);
   console.log(`실행 폴더: ${runDir}`);
   console.log(`시나리오 ${picked.length}건 × ${o.repeat}회 · pass^1 ${summary.pass1 ?? '-'} · 치명 ${summary.critical.count} · 의심 ${summary.suspects.count} · 토큰 ${tokens.total}(${tokens.source === 'metered' ? '응답 계측' : '리포트'})${summary.partial ? ' · 부분 실행' : ''}`);
   // 다 마치지 못한 실행(케이스가 남음)은 치명이 있어도 부분 실행(3)으로 끝낸다
@@ -667,7 +711,7 @@ async function runMain(argv) {
   return summary.partial ? 3 : 0;
 }
 
-module.exports = { parseArgs, lockDown, boot, caseDetail, runScenario, relabelLog, judgeLog, judgeTools, estimate, main };
+module.exports = { parseArgs, lockDown, embedOrigins, boot, caseDetail, runScenario, relabelLog, judgeLog, judgeTools, estimate, main };
 
 // 예상 밖 오류도 설정 실패와 같은 2로 끝낸다(1은 치명 있음). 산출을 다 쓴 뒤 바로 끝내 남은 회차가 되돌린 fetch로 돌지 않게 한다
 if (require.main === module) main().then((c) => process.exit(c), (e) => { console.error(e); process.exit(2); });

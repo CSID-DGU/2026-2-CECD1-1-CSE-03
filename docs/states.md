@@ -153,6 +153,7 @@ LLM 장애 재시도는 `loops.next_retry_at`·`retry_count`·`retry_message_id`
 | `step` | `agent` | `action` | `reason` |
 |---|---|---|---|
 | `prefilter` | `code` | `PASS` · `IGNORE` · `HANDOFF` | 1차 거르기 규칙 사유(§6.3). 통과도 `PASS`로 남긴다. |
+| `retrieve` | `code` | `RAG` · `FALLBACK` | `KB_MODE=rag`일 때만, 접수 Agent 바로 앞. `RAG`는 사유 없음, `FALLBACK`은 폴백 사유(`kb_invalid` · `index_empty` · `embed_*` · `store_*` · `no_hits`) — 그 회차 접수 Agent는 KB 전체를 받는다 |
 | `triage` | `triage` | `CLASSIFIED` | 분류된 intent |
 | `gate1` | `code` | `COMPOSE` · `IGNORE` · `HANDOFF` | 판단 규칙 1–8의 사유(§6.4). 사람 전담 케이스는 `IGNORE`(`responder_human`) |
 | `respond` | `responder` | `COMPOSE` · `REWRITE` | 없음. 검사에 떨어져 다시 쓰면 `REWRITE`(1회) |

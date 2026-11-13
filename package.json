@@ -15,5 +15,8 @@
     "sim": "node --no-warnings=ExperimentalWarning server/mock/sim.js",
     "sim:eval": "node --no-warnings=ExperimentalWarning scripts/sim/run.js",
     "demo:mail": "node --no-warnings=ExperimentalWarning scripts/demo-mail.js"
+  },
+  "dependencies": {
+    "pg": "8.16.3"
   }
 }

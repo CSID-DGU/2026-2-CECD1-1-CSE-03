@@ -343,4 +343,4 @@ function toMarkdown(s) {
   return L.join('\n');
 }
 
-module.exports = { ORDER, outcomeOf, riskiest, adjustForConfig, pointerAt, labelFor, stepDone, goalMet, gradeScenario, applyJudge, applyRelabel, passHatK, aggregate, toMarkdown };
+module.exports = { ORDER, keyOf, outcomeOf, riskiest, adjustForConfig, pointerAt, labelFor, stepDone, goalMet, gradeScenario, applyJudge, applyRelabel, passHatK, aggregate, toMarkdown };
