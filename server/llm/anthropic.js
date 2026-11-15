@@ -2,7 +2,8 @@
 // Claude Messages API를 fetch로 직접 호출(SDK·의존성 없음). json: output_config.format(json_schema)으로 JSON 강제. chat: 툴 호출 한 걸음.
 // anthropic-version 2026-10-21은 temperature를 받지 않는다 — 결정성은 effort:'low' + 스키마로 잡는다.
 const api = () => process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com/v1/messages';
-const model = () => process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+// 에이전트별 모델: ANTHROPIC_MODEL_<에이전트>(TRIAGE·RESPONDER·REVIEWER·BRIEFER·KB_CONVERT)가 있으면 그것, 없으면 ANTHROPIC_MODEL
+const model = (agent) => (agent && process.env[`ANTHROPIC_MODEL_${String(agent).toUpperCase()}`]) || process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 const timeoutMs = () => Number(process.env.LLM_TIMEOUT_MS) || 30_000;
 
 function parseJson(text) {
@@ -30,7 +31,7 @@ async function post(body, { timeout, meta }) {
   usage.calls += 1;
   const u = (k) => Number(data.usage?.[k]) || 0;
   for (const k of ['input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens']) usage[k] += u(k);
-  meta.model = data.model || model();
+  meta.model = data.model || body.model;
   meta.inputTokens = u('input_tokens') + u('cache_creation_input_tokens') + u('cache_read_input_tokens');
   meta.outputTokens = u('output_tokens');
   if (data.stop_reason === 'refusal') throw fail(`anthropic refusal: ${data.stop_details?.category ?? ''}`, { noRetry: true });
@@ -39,9 +40,9 @@ async function post(body, { timeout, meta }) {
 }
 
 // meta: 호출자(agents/common.call)가 넘긴 빈 객체에 이 호출의 모델·토큰을 채운다(llm_calls 계량).
-async function json({ system, user, schema, maxTokens = 4096, timeoutMs: timeout, effort = 'low', meta = {} }) {
+async function json({ agent, system, user, schema, maxTokens = 4096, timeoutMs: timeout, effort = 'low', meta = {} }) {
   const data = await post({
-    model: model(),
+    model: model(agent),
     max_tokens: maxTokens,
     system,
     messages: [{ role: 'user', content: user }],
@@ -56,8 +57,8 @@ async function json({ system, user, schema, maxTokens = 4096, timeoutMs: timeout
  * tool_choice는 보내지 않는다(auto) — sonnet-5-5는 any/tool 강제를 400으로 거절한다. 끝내는 툴을 부르라는 지시는 프롬프트가 한다.
  * @returns {{content: object[], stopReason: string}} content는 그대로 다음 요청의 assistant 턴이 된다(thinking·tool_use 블록 포함).
  */
-async function chat({ system, messages, tools, maxTokens = 4096, timeoutMs: timeout, effort = 'low', meta = {} }) {
-  const data = await post({ model: model(), max_tokens: maxTokens, system, messages, tools, output_config: { effort } }, { timeout, meta });
+async function chat({ agent, system, messages, tools, maxTokens = 4096, timeoutMs: timeout, effort = 'low', meta = {} }) {
+  const data = await post({ model: model(agent), max_tokens: maxTokens, system, messages, tools, output_config: { effort } }, { timeout, meta });
   return { content: data.content || [], stopReason: data.stop_reason };
 }
 

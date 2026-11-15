@@ -55,6 +55,13 @@ const postJson = (http, url, body) => http(url, { method: 'POST', headers: { 'co
 
 /* ---------------- 설정·잠금·기동 ---------------- */
 
+// 에이전트별 모델(ANTHROPIC_MODEL_<에이전트>) — 준 것만 agentBy에 남긴다(없으면 칸 자체가 없어 이전 실행과 같은 조건으로 비교된다)
+function agentModels(env) {
+  const by = Object.fromEntries(['triage', 'responder', 'reviewer', 'briefer']
+    .map((x) => [x, String(env[`ANTHROPIC_MODEL_${x.toUpperCase()}`] ?? '').trim()]).filter(([, v]) => v));
+  return Object.keys(by).length ? { agentBy: by } : {};
+}
+
 /** 실행 조건 검사(argv·env만 본다, 바꾸지 않는다). 거부면 {error: 한국어 한 줄}, 아니면 실행 옵션. */
 function parseArgs(argv = [], env = process.env) {
   const a = {};
@@ -91,7 +98,7 @@ function parseArgs(argv = [], env = process.env) {
     file, personas, out, compareTo, autoSend: a['auto-send'] !== '0',
     turnTimeoutMs: timeout ?? (provider === 'mock' ? 5000 : 180_000), pollMs: provider === 'mock' ? 25 : 500,
     models: provider === 'mock' ? { agent: 'mock', customer: 'mock', judge: 'mock' }
-      : { agent: str(env.ANTHROPIC_MODEL) ?? require('../../server/llm/anthropic').model(), customer: str(a['customer-model']), judge: str(a['judge-model']) },
+      : { agent: str(env.ANTHROPIC_MODEL) ?? require('../../server/llm/anthropic').model(), customer: str(a['customer-model']), judge: str(a['judge-model']), ...agentModels(env) },
   };
   if (real) {
     if (!o.models.customer || !o.models.judge) return err('--customer-model=<id>·--judge-model=<id>가 있어야 한다(모델 id 기본값은 두지 않는다).');

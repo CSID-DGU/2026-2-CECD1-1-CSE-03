@@ -350,3 +350,19 @@ describe('운영 리포트·CSV·섀도 API', () => {
     assert.deepEqual([logs[0].user, logs[0].channel, logs[0].count, !!logs[0].ip], ['kim', 'support', 1, true]);
   });
 });
+
+test('에이전트별 모델: ANTHROPIC_MODEL_<에이전트>가 있으면 그것, 없으면 ANTHROPIC_MODEL, 그것도 없으면 기본값', () => {
+  const keys = ['ANTHROPIC_MODEL', 'ANTHROPIC_MODEL_TRIAGE', 'ANTHROPIC_MODEL_REVIEWER'];
+  const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  try {
+    for (const k of keys) delete process.env[k];
+    assert.equal(anthropic.model('triage'), 'claude-sonnet-5-5');
+    process.env.ANTHROPIC_MODEL = 'm-base';
+    process.env.ANTHROPIC_MODEL_TRIAGE = 'm-small';
+    assert.equal(anthropic.model('triage'), 'm-small');
+    assert.equal(anthropic.model('reviewer'), 'm-base');
+    assert.equal(anthropic.model(), 'm-base');
+  } finally {
+    for (const k of keys) if (prev[k] === undefined) delete process.env[k]; else process.env[k] = prev[k];
+  }
+});
