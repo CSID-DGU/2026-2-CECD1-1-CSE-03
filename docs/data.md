@@ -14,6 +14,7 @@
 | `policy/*.json` | 채널 정책 팩. 의도별 처리 수준(자동 발송, 초안 검토, 사람 처리)과 금지 규칙 | 우리가 정한 설계값 | `server/policy.js` | 고객사와 수준을 합의해 고친다 |
 | `server/mock/inquiries.js` | 합성 문의 20건과 기대 처리 결과 | 가상 | `npm run demo`, `npm run sim`, 테스트 | 그대로 둔다(회귀 검사용) |
 | `server/mock/business-data.json` | 주문·결제·계정 조회 툴과 담당자 빈 시간 툴의 시험용 원본(`orders`·`billing`·`accounts`·`meeting`). 이메일은 `inquiries.js`의 가상 고객, 평가 세트 v2의 등록 고객과 맞춘다 | 가상 | `BUSINESS_DATA_FILE`로 지정했을 때 `server/agents/tools/business.js`. 평가 실행기는 늘 이 파일로 고정 | 고객사 주문·결제·계정 시스템과 캘린더 연동으로 바꾼다 |
+| `eval/scenarios.v3.jsonl` | v2와 같고 `sup-reg_login-a` 기대만 「답장 + 넘김(`out_of_knowledge`)」으로 고쳤다. 잠금 해제는 사람이 하므로 답하고 넘기는 것이 맞는 처리다 | 우리가 새로 쓴 문장 | `scripts/sim/`(`--set=v3`) | 동결본. 고치려면 v4 |
 | `eval/scenarios.v2.jsonl` | v1 120건 + 등록 고객 시나리오 8건(`registered` 태그, 기대 툴 `expect.tools`) | 우리가 새로 쓴 문장 | `scripts/sim/`(`--set=v2`) | 동결본. 고치려면 v3 |
 | `eval/scenarios.v1.jsonl` | 가상 고객 평가 시나리오 120건 | 우리가 새로 쓴 문장. 외부 데이터셋은 [`eval/SOURCES.md`](../eval/SOURCES.md)의 범위에서만 참고 | `scripts/sim/` | 동결본이라 고치지 않는다. 바꾸려면 새 버전(v2)을 만든다 |
 | `eval/personas.v1.json` | 시나리오의 고객 페르소나 | 가상 | 같음 | 같음 |
