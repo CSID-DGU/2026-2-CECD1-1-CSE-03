@@ -173,6 +173,35 @@ test('promotionByIntent: 채널별 합이 cases.promotion과 같다(발송 초�
   assert.equal(lv('support', 'login_issue'), 'L1');
 });
 
+test('retention: 주별 무수정 승인 비율과 자동 발송 수, 오래된 주부터, 채널 필터', async () => {
+  db.init(':memory:');
+  const pend = (caseId) => db.get("SELECT id FROM drafts WHERE case_id=? AND status='PENDING'", caseId).id;
+  const sentAt = (caseId, at) => db.run("UPDATE drafts SET sent_at=? WHERE case_id=? AND status='SENT'", at, caseId);
+  const a = await run('영수증 발급 방법 알려주세요');
+  await loop.approveDraft(pend(a.caseId), { by: 'h' });
+  sentAt(a.caseId, '2026-11-03T10:00:00Z'); // 화요일 — 11-02(월) 주
+  const b = await run('로그인이 안 돼요. 비밀번호 재설정 방법 알려주세요');
+  await loop.approveDraft(pend(b.caseId), { by: 'h', finalBody: '고친 답장입니다. 비밀번호 재설정은 로그인 화면에서 합니다.' });
+  sentAt(b.caseId, '2026-11-08T23:00:00Z'); // 일요일 — 같은 주
+  const c = await run('영수증 다시 받을 수 있나요?');
+  await loop.approveDraft(pend(c.caseId), { by: 'h' });
+  sentAt(c.caseId, '2026-11-09T00:00:00Z'); // 월요일 — 다음 주
+  db.run("UPDATE drafts SET approved_by='agent:auto' WHERE case_id=? AND status='SENT'", c.caseId);
+  const d = await run('회사 소개서 자료 보내주세요', 'sales');
+  await loop.approveDraft(pend(d.caseId), { by: 'h' });
+  sentAt(d.caseId, '2026-11-10T00:00:00Z');
+
+  const r = report.retention();
+  assert.deepEqual(r.weeks.map((w) => ({ ...w })), [
+    { week: '2026-11-02', reviewed: 2, noEdit: 1, autoSent: 0, noEditRate: 0.5 },
+    { week: '2026-11-09', reviewed: 1, noEdit: 1, autoSent: 1, noEditRate: 1 },
+  ]);
+  assert.deepEqual(report.retention({ channel: 'support' }).weeks.map((w) => w.reviewed), [2, 0]);
+  assert.equal(report.retention({ channel: 'support' }).weeks[1].noEditRate, null);
+  assert.deepEqual(report.retention({ weeks: 1 }).weeks.map((w) => w.week), ['2026-11-09']);
+  assert.equal(report.retention({ weeks: 'x' }).weeks.length, 2);
+});
+
 test('promotionByIntent 등급 = 실제로 도는 등급: H 우선, 섀도 L0, 팩 maxLevel이 깎는다, 자동 발송이 꺼지면 L2도 L1, 등급 없는 intent는 null', () => {
   db.init(':memory:');
   process.env.AUTO_SEND = '1';

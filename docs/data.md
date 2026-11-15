@@ -45,3 +45,4 @@ ReAct 실행에서 답장 Agent가 지식베이스에 답이 없다고 보고한
 | onboarding | 온보딩 전에 미리 준비하거나 설정할 것 | `onboarding_steps` 또는 `materials` |
 | onboarding | 미팅 전에 팀원을 먼저 초대할 수 있는지 | `onboarding_steps` |
 | support | 앱에서 해지 신청한 뒤 처리됐는지 확인하는 방법 | `cancel_subscription` |
+| support | 계정 삭제를 요청한 뒤 처리가 끝나기 전까지 로그인할 수 있는지 | `account_deletion` |

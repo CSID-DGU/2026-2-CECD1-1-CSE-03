@@ -169,6 +169,23 @@ function workload({ from, to, channel } = {}) {
 }
 
 /**
+ * 지속 사용 지표: 주(월요일 시작, UTC)별 발송된 에이전트 초안. 담당자가 고치지 않고 승인한 비율(noEditRate)이 유지·상승하면
+ * 담당자가 계속 믿고 쓴다는 뜻이다. reviewed = 사람이 승인해 나간 에이전트 초안(ACK·직접 답장·자동 발송 제외), noEdit = 그중 final_body 없음,
+ * autoSent = 자동 발송. 승격 지표(promotionByIntent)와 같은 표본을 주별로 나눈 것이다. 최근 weeks주(기본 8), 오래된 주부터.
+ */
+function retention({ weeks = 8, channel } = {}) {
+  const n = Math.min(Math.max(1, Math.trunc(Number(weeks)) || 8), 52);
+  const rows = db.all(`SELECT date(d.sent_at, 'weekday 0', '-6 days') week,
+      COALESCE(SUM(COALESCE(d.approved_by, '')<>'agent:auto'), 0) reviewed,
+      COALESCE(SUM(COALESCE(d.approved_by, '')<>'agent:auto' AND d.final_body IS NULL), 0) noEdit,
+      COALESCE(SUM(d.approved_by='agent:auto'), 0) autoSent
+    FROM drafts d JOIN cases c ON c.id=d.case_id
+    WHERE d.status='SENT' AND d.sent_at IS NOT NULL AND COALESCE(d.action, '') NOT IN ('HUMAN_REPLY','ACK') AND (?1 IS NULL OR c.channel=?1)
+    GROUP BY week ORDER BY week DESC LIMIT ?2`, channel || null, n);
+  return { channel: channel || null, weeks: rows.reverse().map((r) => ({ ...r, noEditRate: rate(r.noEdit, r.reviewed) })) };
+}
+
+/**
  * 매뉴얼 보강 목록: 답장 Agent가 지식베이스에 없다고 남긴 질문(판정 기록 respond 출력의 knowledgeGaps). 최신순, 질문은 저장 때 이미 가렸다.
  * byNearest = 가장 가까웠던 절별 건수 — 어느 절을 보강하면 되는지 본다(가까운 절이 없으면 '(없음)').
  */
@@ -183,4 +200,4 @@ function knowledgeGaps({ channel, limit = 50 } = {}) {
   return { total: items.length, byNearest, items: items.slice(0, Math.min(Math.max(1, Number(limit) || 50), 200)) };
 }
 
-module.exports = { budget, llmUsage, promotionByIntent, promotionCsv, unratedShadow, workload, knowledgeGaps, WORKLOAD_SQL };
+module.exports = { budget, llmUsage, promotionByIntent, promotionCsv, unratedShadow, workload, retention, knowledgeGaps, WORKLOAD_SQL };
