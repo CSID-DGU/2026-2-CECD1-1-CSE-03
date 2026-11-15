@@ -125,3 +125,14 @@ describe('영수증 + 환불 분류', () => {
     assert.equal(d({ handoffReason: 'call_meeting' }).action, 'ANSWER_AND_HANDOFF', '답해도 되는 사유는 섞여도 답한다');
   });
 });
+
+test('위협·폭언(threat)이면 답장을 쓰지 않고 규칙 2로 사람에게 넘긴다 — 무시·인사로 분류돼도, 세 채널 모두', () => {
+  for (const ch of ['support', 'onboarding', 'sales']) {
+    const p = policy.load(ch);
+    const intent = Object.keys(p.intents).find((k) => p.intents[k].level === 'L2' || p.intents[k].level === 'L1');
+    const d = policy.decide({ pack: p, triage: tri({ intent, threat: true }) });
+    assert.deepEqual([d.action, d.reason, d.rule], ['HANDOFF', 'threat', 2], ch);
+    assert.equal(policy.decide({ pack: p, triage: tri({ intent: 'ignore', threat: true }) }).reason, 'threat', ch);
+  }
+  assert.equal(decide({ triage: tri({ threat: false }) }).action === 'HANDOFF' && decide({ triage: tri({ threat: false }) }).reason === 'threat', false);
+});

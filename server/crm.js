@@ -16,7 +16,7 @@ const ACTIONS = ['approve', 'edit_approve', 'discard', 'takeover', 'human_reply'
 // 공용 메일 도메인 — 고객사를 만들지 않는다(B2C 문의자는 companyId null).
 const PUBLIC_DOMAINS = ['gmail.com', 'naver.com', 'daum.net', 'hanmail.net', 'kakao.com', 'outlook.com', 'hotmail.com', 'yahoo.com', 'icloud.com', 'nate.com'];
 // 우선순위 High — 이 넘김 사유이거나 분류 위험 신호가 이것
-const HIGH_REASONS = ['legal_threat', 'injection', 'billing_dispute', 'complaint', 'sender_unverified', 'sender_changed'];
+const HIGH_REASONS = ['threat', 'legal_threat', 'injection', 'billing_dispute', 'complaint', 'sender_unverified', 'sender_changed'];
 const HIGH_RISKS = ['legal', 'billing', 'complaint'];
 // 자동 종결 사유 → closeReason
 const AUTO_CLOSE = { ignored_first_message: 'not_applicable', declined_ack: 'resolved', courtesy_reply: 'resolved', inactive: 'no_response' };

@@ -23,7 +23,7 @@
     "ack": {},
     "ignore": {}
   },
-  "handoffReasons": ["price_contract", "contract_documents", "call_meeting", "human_request", "purchase_intent", "list_request", "complaint", "injection", "out_of_knowledge", "low_confidence", "no_progress", "round_limit", "guard_failed", "llm_error", "unclear", "legal_threat", "sender_changed", "sender_unverified", "internal_error", "language_unsupported", "discarded"],
+  "handoffReasons": ["price_contract", "contract_documents", "call_meeting", "human_request", "purchase_intent", "list_request", "complaint", "injection", "out_of_knowledge", "low_confidence", "no_progress", "round_limit", "guard_failed", "llm_error", "unclear", "legal_threat", "sender_changed", "sender_unverified", "internal_error", "language_unsupported", "discarded", "threat"],
   "answerableHandoffReasons": ["human_request", "call_meeting", "contract_documents", "purchase_intent", "out_of_knowledge", "price_contract"],
   "thresholds": { "confidenceMin": 0.8, "maxRounds": 10, "repeatLimit": 2, "maxLength": 600 },
   "guard": { "forbiddenWords": ["할인", "수수료", "정산", "위약", "환불"], "allowDates": false, "allowAmounts": false, "allowQuantities": false, "forbiddenWordsEn": ["refund", "discount", "compensation", "lawsuit", "legal", "guarantee"] },

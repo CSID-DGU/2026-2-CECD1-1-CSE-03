@@ -228,7 +228,7 @@ LLM 전에 코드가 위에서부터 첫 매치를 고른다. 규칙의 사유�
 | 규칙 | action | 사유 | 조건 |
 |---|---|---|---|
 | 1 | IGNORE | `ack` · `ignore` | intent가 감사 인사·무시 대상 |
-| 2 | HANDOFF | `language_unsupported` 또는 모델·intent 사유 | 미지원 언어, H 등급 intent, 팩 `maxLevel = H`, 위험 신호, 답할 몫이 없는 사유 |
+| 2 | HANDOFF | `threat`, `language_unsupported` 또는 모델·intent 사유 | 접수 Agent가 위협·협박·폭언·자해 언급(`threat`)을 잡음(무시·인사 분류보다 먼저 본다), 미지원 언어, H 등급 intent, 팩 `maxLevel = H`, 위험 신호, 답할 몫이 없는 사유 |
 | 3 | HANDOFF | `no_progress` | 같은 질문 반복이 `repeatLimit`에 닿았다. |
 | 4 | HANDOFF | `low_confidence` | 확신도가 `confidenceMin` 미만이다. |
 | 5 | HANDOFF | `round_limit` | 에이전트 답장 횟수가 `maxRounds`에 닿았다. |

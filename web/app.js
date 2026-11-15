@@ -30,7 +30,7 @@ const LABELS = {
     list_request: '명단 요청', pricing: '요금 문의', policy_exception: '정책 예외', account_identity: '본인 확인 필요', injection: '지시 변경 시도',
     custom_data: '맞춤 데이터 요청', custom_quote: '맞춤 견적', pricing_exception: '요금 예외', access_grant: '권한·라이선스 부여', trial_access: '체험 권한',
     out_of_knowledge: '지식베이스에 없음', low_confidence: '확신 낮음', no_progress: '같은 질문 반복', round_limit: '왕복 한도', guard_failed: '검사 실패',
-    llm_error: 'LLM 장애', internal_error: '내부 오류', unclear: '뜻 불분명', sender_changed: '보낸 사람 바뀜', sender_unverified: '발신자 인증 실패', language_unsupported: '지원 안 하는 언어',
+    llm_error: 'LLM 장애', internal_error: '내부 오류', unclear: '뜻 불분명', sender_changed: '보낸 사람 바뀜', sender_unverified: '발신자 인증 실패', language_unsupported: '지원 안 하는 언어', threat: '위협·폭언',
     discarded: '초안 폐기', auto_reply_or_empty: '자동 회신·빈 메일', internal_sender: '사내 발신', responder_human: '사람이 맡은 케이스',
     case_changed: '회차 중 상황 바뀜', shadow: '섀도 채널', ack: '감사·확인 인사', ignore: '무시 대상', answer_and_handoff: '답장 + 넘김',
     ignored_first_message: '첫 메시지 무시', inactive: '장기 무응답', already_answered: '다른 답장이 먼저 나감', newer_inbound: '더 새 고객 메시지',

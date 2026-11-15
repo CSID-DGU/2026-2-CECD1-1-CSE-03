@@ -114,6 +114,7 @@ LLM 장애(`server/loop.js scheduleRetry`): `llm_error` 를 기록하고 케이�
 | rule | 조건(첫 매치) | 결과 |
 |---|---|---|
 | 1 | intent `ignore` · `ack` | IGNORE |
+| 2 | 접수 Agent 의 `threat` 가 true(위협·협박·폭언·자해) — 규칙 1보다 먼저 본다 | HANDOFF `threat` |
 | 2 | language 가 팩 `languages` 밖 | HANDOFF `language_unsupported` |
 | 2 | intent 등급 H · 팩 maxLevel H · **riskSignals 에 refund·legal·complaint·injection** · handoffReason 이 있고 (kbHit=false 거나 답할 수 있는 사유 목록 밖) | **kbHit 와 무관하게 통째 HANDOFF** |
 | 3 · 4 · 5 | 되묻기 ≥ repeatLimit · confidence < confidenceMin · 왕복 ≥ maxRounds | HANDOFF `no_progress` · `low_confidence` · `round_limit` |

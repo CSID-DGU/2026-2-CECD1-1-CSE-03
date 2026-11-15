@@ -5,7 +5,7 @@
   const CH_RE = /^[a-z][a-z0-9_]{1,39}$/;
   const RESERVED = ['ack', 'ignore', 'injection', 'human_request'];
   const REQUIRED_REASONS = ['injection', 'legal_threat', 'human_request', 'sender_unverified'];
-  const SYSTEM_REASONS = ['unclear', 'out_of_knowledge', 'low_confidence', 'no_progress', 'round_limit', 'guard_failed', 'llm_error', 'internal_error', 'language_unsupported', 'discarded'];
+  const SYSTEM_REASONS = ['unclear', 'out_of_knowledge', 'low_confidence', 'no_progress', 'round_limit', 'guard_failed', 'llm_error', 'internal_error', 'language_unsupported', 'discarded', 'threat'];
   const LEVELS = ['L0', 'L1', 'L2', 'H'];
   const UPLOAD_MAX = 10 * 1024 * 1024;
   const TABS = [['channels', '채널'], ['kb', '지식베이스'], ['policy', '정책'], ['convert', '매뉴얼 변환'], ['history', '기록']];

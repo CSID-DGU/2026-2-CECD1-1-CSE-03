@@ -40,7 +40,7 @@ const RISK_REASON = { refund: 'refund_request', legal: 'legal_threat', complaint
 const PROMOTION = { minReviewed: 50, minNoEditRate: 0.9, maxCritical: 0 };
 const REQUIRED_REASONS = ['injection', 'legal_threat', 'human_request', 'sender_unverified'];
 // 코드가 내는 넘김 사유 — 팩에서 빠지면 normalizeReason이 unclear로 뭉개 정보를 잃는다.
-const SYSTEM_REASONS = ['unclear', 'out_of_knowledge', 'low_confidence', 'no_progress', 'round_limit', 'guard_failed', 'llm_error', 'internal_error', 'language_unsupported', 'discarded'];
+const SYSTEM_REASONS = ['unclear', 'out_of_knowledge', 'low_confidence', 'no_progress', 'round_limit', 'guard_failed', 'llm_error', 'internal_error', 'language_unsupported', 'discarded', 'threat'];
 // 코드 하한 — 팩은 이보다 엄격하게만 바꿀 수 있다.
 const FLOOR = { confidenceMin: 0.8, maxRounds: 10, repeatLimit: 2, allowAmounts: false };
 const LANGS = ['ko', 'en'];
@@ -374,7 +374,7 @@ function decide({ pack, triage, rounds = 0, repeatStreak = 0, guard, senderTrust
   const inputs = {
     intent, level: def?.level ?? null, handoffReason: triage.handoffReason ?? null, kbHit: triage.kbHit, confidence: triage.confidence,
     confidenceMin: t.confidenceMin, rounds, maxRounds: t.maxRounds, repeatStreak, repeatLimit: t.repeatLimit,
-    riskSignals: triage.riskSignals || [], language: triage.language || 'ko', shadow: !!pack.shadow, guardPass: guard ? !!guard.pass : null,
+    riskSignals: triage.riskSignals || [], threat: triage.threat === true, language: triage.language || 'ko', shadow: !!pack.shadow, guardPass: guard ? !!guard.pass : null,
     senderTrusted: trusted, autoSend: autoAllowed(pack) && def?.level === 'L2' && trusted, // 미신뢰 발신자는 L2 intent도 승인 대기
   };
   const out = (rule, action, reason) => ({ action, ...(reason !== undefined ? { reason } : {}), rule, inputs });
@@ -382,6 +382,8 @@ function decide({ pack, triage, rounds = 0, repeatStreak = 0, guard, senderTrust
   const answerable = pack.answerableHandoffReasons || DEFAULT_ANSWERABLE;
   const risk = (triage.riskSignals || []).find((r) => RISK_REASON[r]);
 
+  // 위협·협박·폭언·자해 언급은 답장을 쓰지 않고 바로 사람에게 넘긴다(무시·인사로 분류됐어도)
+  if (triage.threat === true) return H(2, 'threat');
   if (intent === 'ignore' || intent === 'ack') return out(1, 'IGNORE', intent);
   // 2 사람 전용 — H 등급, 미지원 언어, 위험 신호, 답할 몫이 없는 사유, 답해도 되는 목록 밖의 사유
   if (!(pack.languages || ['ko']).includes(inputs.language)) return H(2, 'language_unsupported');
