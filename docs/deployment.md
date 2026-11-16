@@ -32,6 +32,7 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `ANTHROPIC_API_KEY` | `server/llm/anthropic.js` | Claude API 키. `npm run smoke:llm` 은 없으면 거부 |
 | `ANTHROPIC_MODEL` (`claude-sonnet-5-5`) | `server/llm/anthropic.js` | 모델 id |
 | `ANTHROPIC_MODEL_TRIAGE` · `_RESPONDER` · `_REVIEWER` · `_BRIEFER` (없음) | `server/llm/anthropic.js` | 그 에이전트만 다른 모델로. 비우면 `ANTHROPIC_MODEL`. 평가 실행기는 준 값을 `meta.models.agentBy`에 남기고 비교표가 다른 조건으로 적는다 |
+| `GEMINI_API_KEY` (없음) | `scripts/decision-compare.js` | 결정 모델 비교 실험만 쓴다. 서버는 읽지 않는다. 무료 등급은 입력을 제품 개선에 쓸 수 있으니 합성 평가 세트만 보낸다. [decision-model.md](decision-model.md) |
 | `ANTHROPIC_BASE_URL` (`https://api.anthropic.com/v1/messages`) | `server/llm/anthropic.js` | Messages 엔드포인트. `fetch` 직접 호출, `anthropic-version: 2026-10-21`, JSON 은 `output_config.format: json_schema` |
 | `LLM_TIMEOUT_MS` (30000) | `server/llm/anthropic.js` | LLM 호출 하나의 제한 시간(`AbortSignal.timeout`) |
 | `RESPONDER_MODE` (react) | `server/agents/responder.js` | 답장 Agent 방식. 기본 `react`는 툴(지식베이스 찾기·읽기, 고객 이력, 주문·결제 조회, 초안 검사·제출, 사람에게 넘김)을 모델이 골라 부른다(목록은 `docs/tools.md`). `single`이면 한 번 묻고 JSON을 받는다 |

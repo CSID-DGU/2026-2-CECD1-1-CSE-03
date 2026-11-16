@@ -29,6 +29,8 @@
 | `../eval-out/` | 평가 실행 산출물(`npm run sim:eval`, `scripts/eval-real.js`) | 저장소 밖에 둔다. 비교는 `scripts/sim/compare.js`로 집계만 읽는다 |
 | `.env` | 키와 운영 설정 | `.gitignore`에 있다. 항목 설명은 `.env.example`과 [`deployment.md`](deployment.md) |
 
+결정 모델 비교 실험 결과는 `../eval-out/decision/`에 있다. 요약은 [decision-model.md](decision-model.md)에 있다.
+
 ## 지식베이스를 고칠 때
 
 - `kb.js`는 `validUntil`이 지난 절을 빼고 남은 본문으로 버전 해시를 만든다. 지식베이스를 고치면 해시가 바뀌고, 평가 실행 비교표에 「지식베이스」가 다른 조건으로 표시된다.
