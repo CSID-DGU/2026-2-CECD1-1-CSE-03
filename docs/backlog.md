@@ -15,7 +15,7 @@
 | 실제 메일 수신·발송 | 범위 밖(프로토) | 수신 = `POST /api/inbound` 웹훅 계약만. 발송 = `mock`. 배포 시 SMTP/Gmail 어댑터 1파일 |
 | 멱등·동시성 | 가능 | `claims` PK insert, 케이스 리스 10분 + 큐, `drafts.idempotency_key` unique, PENDING→SENDING 선점 UPDATE. SQLite 단일 writer라 경쟁 단순 |
 | 프레임워크 없는 대시보드 | 가능 | 위험: XSS → 서버 문자열은 전부 노드 생성·이스케이프. 오프라인 동작(CDN 없음) |
-| archify 다이어그램 | 가능 | 도구가 지원하지 않는 형식(ERD)은 아키텍처형으로 대체 + `docs/db.md` Mermaid |
+| 다이어그램(HTML) | 가능 | 도구가 지원하지 않는 형식(ERD)은 아키텍처형으로 대체 + `docs/db.md` Mermaid |
 | 한국어 답변 품질 평가 | 보류 | mock으론 문체 평가 불가. 실제 provider + 평가셋 필요. 프로토는 행동(답/넘김/무시) 일치만 검증 |
 | L0→L1 승격 지표 | 가능(기록만) | 무수정 승인률·치명 오류를 `activities`·`drafts`에서 계산. 판단 자동화는 물량 쌓인 뒤 |
 | 일본어 등 추가 언어 | 제외 | `language`는 `ko`·`en`만. 그 외는 `unclear`로 사람 전담 |
@@ -155,7 +155,7 @@
 - 정책 12규칙·guard 10코드·승인 경쟁 4경로·루프 20건이 커버된다
 - 테스트 총 실행 10초 이내
 
-### B12. archify 다이어그램 4종
+### B12. 다이어그램 4종
 
 **Why:** 팀과 심사자가 코드 없이 루프·페르소나·분류·상태·데이터 모델을 이해해야 한다.
 

@@ -14,7 +14,7 @@
 | [`diagrams/cs-agent-draft-lifecycle.html`](diagrams/cs-agent-draft-lifecycle.html) | 초안(draft) 상태 전이 |
 | [`diagrams/cs-agent-data-model.html`](diagrams/cs-agent-data-model.html) | 데이터 모델 (테이블·관계·멱등 키) |
 
-같은 이름의 `.json`이 원본 명세다. 고치려면 json을 고쳐 다시 렌더한다(`archify deliver`).
+같은 이름의 `.json`이 원본 명세다. 고치려면 json을 고쳐 다이어그램 렌더러로 다시 렌더한다.
 
 ## 1. 한 문장
 
