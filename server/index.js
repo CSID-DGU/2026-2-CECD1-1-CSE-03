@@ -258,6 +258,7 @@ const CORE = [
     };
     return report.workload({ from: iso('from'), to: iso('to'), channel: q.channel || null });
   }],
+  ['GET', /^\/api\/report\/retention$/, (_m, q) => report.retention({ weeks: q.weeks, channel: q.channel || null })],
   // 매뉴얼 보강 목록 — 고객 질문에서 온 글(가린 뒤)이라 섀도 목록처럼 접속기록을 남긴다
   ['GET', /^\/api\/report\/knowledge-gaps$/, (_m, q, _b, ctx) => {
     const g = report.knowledgeGaps({ channel: q.channel, limit: q.limit });

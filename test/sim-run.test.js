@@ -141,7 +141,8 @@ test('scripts/sim 소스: loop 모듈·SQL·허용 밖 DB 호출과 require가 �
     for (const rest of src.split('db.get(').slice(1)) assert.ok(rest.startsWith("'PRAGMA wal_checkpoint(TRUNCATE)')"), f);
     for (const m of src.matchAll(/require\('([^']+)'\)/g)) {
       // agents/tools는 실행 기록에 노출 툴 이름을 남기고, 채점 근거로 등록 고객의 읽기 전용 사실 조회만 다시 부른다
-      assert.match(m[1], /^node:|^\.\/\w+$|^\.\.\/\.\.\/server\/(index|db|policy|kb|guard|llm|llm\/anthropic|llm\/mock|mock\/inquiries|agents\/tools)$/, `${f}: ${m[1]}`);
+      // embed-bedrock은 rag + bedrock-cohere일 때 잠금이 허용할 오리진을 계산하려고만 읽는다
+      assert.match(m[1], /^node:|^\.\/\w+$|^\.\.\/\.\.\/server\/(index|db|policy|kb|guard|llm|llm\/anthropic|llm\/mock|mock\/inquiries|agents\/tools|embed-bedrock)$/, `${f}: ${m[1]}`);
     }
   }
   assert.equal(all.match(/['"`]\.\.\/data['"`/]/g)?.length ?? 0, 0, '실데이터 경로 문자열 리터럴이 없다(공용 경로 검사가 이름을 조립한다)');

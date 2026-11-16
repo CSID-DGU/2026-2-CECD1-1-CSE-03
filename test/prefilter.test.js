@@ -72,6 +72,11 @@ describe('1차 거르기 규칙의 놓침과 오탐', () => {
     for (const b of ['정기결제 해지를 하지 않아 불필요한 결제가 됐습니다', '해지했는데 또 결제됐어요', '정기 결제가 발생하고 있습니다'])
       assert.equal(pf(b), 'billing_dispute', b);
     assert.equal(pf('해지했는데 또 결제됐어요. 소비자원에 신고하겠습니다'), 'legal_threat', '법적 위협이 먼저');
+    for (const b of ['해지했는데 결제가 또 됐어요', '해지 신청했는데 이번 달에도 카드에서 결제가 빠져나갔어요'])
+      assert.equal(pf(b), 'billing_dispute', b);
+    // 해지와 결제가 함께 나오는 단순 문의는 코드가 넘기지 않는다(접수 Agent가 판단)
+    for (const b of ['해지하면 이번 달 결제는 어떻게 되나요?', '결제일 전에 해지하면 다음 결제는 안 나가나요?', '해지 후에도 결제 내역 볼 수 있나요?', '결제 수단 바꾸려면 해지해야 하나요?'])
+      assert.equal(pf(b), null, b);
     for (const b of ['구독을 해지하고 싶은데 메뉴를 못 찾겠어요. 해지 방법 알려주세요.', '지난달 결제 건 영수증이 필요합니다.', '어제 자동결제가 됐는데 쓰지도 않았어요. 환불해 주세요.'])
       assert.equal(pf(b), null, b);
     assert.equal(pf('결제 취소 부탁드립니다', 'onboarding'), null);

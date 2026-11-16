@@ -18,9 +18,12 @@ globalThis.fetch = async (input, init) => {
   return handler({ url: req.url, body, signal: init?.signal ?? req.signal });
 };
 // 시간 초과 흉내: 응답하지 않다가 abort가 오면 그 이유로 실패한다(이미 abort됐으면 바로)
+// AbortSignal.timeout의 타이머는 이벤트 루프를 붙잡지 않는다 — 진짜 소켓 없이 기다리면 Node가 먼저 끝나므로 기다리는 동안 타이머 하나를 잡아 둔다
 const hang = ({ signal }) => new Promise((_, no) => {
-  if (signal.aborted) return no(signal.reason);
-  signal.addEventListener('abort', () => no(signal.reason), { once: true });
+  const keep = setInterval(() => {}, 1000);
+  const stop = () => { clearInterval(keep); no(signal.reason); };
+  if (signal.aborted) return stop();
+  signal.addEventListener('abort', stop, { once: true });
 });
 
 const db = require('../server/db');

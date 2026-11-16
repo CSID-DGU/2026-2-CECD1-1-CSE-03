@@ -81,6 +81,47 @@
         "onboarding": "34396e78",
         "sales": "b3919f70"
       }
+    },
+    "v3": {
+      "file": "eval/scenarios.v3.jsonl",
+      "sha256": "7205ac0d5f10d55b02b94679e83699efa6dbd92fe5dd82fb9cf3d7d2bd5f4a2d",
+      "count": 128,
+      "composition": {
+        "bundle": {
+          "G": 4,
+          "F": 4,
+          "A": 84,
+          "I": 4,
+          "J": 6,
+          "H": 4,
+          "B": 8,
+          "C": 4,
+          "E": 4,
+          "D": 6
+        },
+        "split": {
+          "test": 102,
+          "dev": 26
+        },
+        "channel": {
+          "onboarding": 30,
+          "sales": 38,
+          "support": 60
+        }
+      },
+      "frozenAt": "2026-11-15T03:50:23.404Z",
+      "personasFile": "eval/personas.v1.json",
+      "personasSha256": "31066a4f3ed6d0262b2b3e71a19c2ebb6d9d213d9690acbd200d20adf310952f",
+      "policySha256": {
+        "support": "ce390683",
+        "onboarding": "9d56be2f",
+        "sales": "4627061e"
+      },
+      "kbSha256": {
+        "support": "9a7bd181",
+        "onboarding": "34396e78",
+        "sales": "b3919f70"
+      }
     }
   }
 }

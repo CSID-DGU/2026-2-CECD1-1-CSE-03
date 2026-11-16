@@ -215,7 +215,7 @@ LLM 전에 코드가 위에서부터 첫 매치를 고른다. 규칙의 사유�
 | 9 | HANDOFF | `contract_documents` | 계약서·사업자등록증 등 서류 요청 문장 |
 | 10 | HANDOFF | `legal_threat` | 법적 언급 |
 | 11 | HANDOFF | `refund_request` | 결제 취소·환급, 구독 중도 해지(규칙 2개) |
-| 12 | HANDOFF | `billing_dispute` | 해지 뒤 결제, 계속 빠져나가는 결제(규칙 2개) |
+| 12 | HANDOFF | `billing_dispute` | 해지했거나 해지하지 못했는데 결제가 나간 문장, 계속 빠져나가는 결제(규칙 2개). 해지와 결제가 함께 나오는 단순 문의는 넘기지 않는다 |
 | 13 | HANDOFF | `complaint` | 분석 결과로 피해를 봤다·내려 달라는 항의 |
 | 14 | HANDOFF | `pricing` | 엔터프라이즈 요금·가격 불일치. 할인 요청은 support 채널에서만 돈다. |
 | 15 | HANDOFF | `policy_exception` | 크레딧·쿼터·라이선스·권한·체험 계정 부여 요청 |
@@ -228,7 +228,7 @@ LLM 전에 코드가 위에서부터 첫 매치를 고른다. 규칙의 사유�
 | 규칙 | action | 사유 | 조건 |
 |---|---|---|---|
 | 1 | IGNORE | `ack` · `ignore` | intent가 감사 인사·무시 대상 |
-| 2 | HANDOFF | `language_unsupported` 또는 모델·intent 사유 | 미지원 언어, H 등급 intent, 팩 `maxLevel = H`, 위험 신호, 답할 몫이 없는 사유 |
+| 2 | HANDOFF | `threat`, `language_unsupported` 또는 모델·intent 사유 | 접수 Agent가 위협·협박·폭언·자해 언급(`threat`)을 잡음(무시·인사 분류보다 먼저 본다), 미지원 언어, H 등급 intent, 팩 `maxLevel = H`, 위험 신호, 답할 몫이 없는 사유 |
 | 3 | HANDOFF | `no_progress` | 같은 질문 반복이 `repeatLimit`에 닿았다. |
 | 4 | HANDOFF | `low_confidence` | 확신도가 `confidenceMin` 미만이다. |
 | 5 | HANDOFF | `round_limit` | 에이전트 답장 횟수가 `maxRounds`에 닿았다. |
