@@ -430,7 +430,9 @@ guard.check 위반 코드: `empty` `too_long` `forbidden_word` `amount` `date_pr
 | `POST /api/console/drafts/:id/save` | 관리자 | `{raw, revision}` | `{revision, check, diff}` / `409 stale` / `409 draft_busy` |
 | `POST /api/console/drafts/:id/publish` | 관리자 | `{baseHash, revision, note, ack?}` | KB 게시와 같다 / `409 stale {current}`(보낸 `revision` 이 초안의 현재 값과 다름) / `409 draft_busy` |
 | `POST /api/console/drafts/:id/discard` | 관리자 | `{}` | `{status:'discarded'}`. 변환 중이면 작업을 멈추고 버린다 |
-| `POST /api/console/members/restore` | 관리자 | `{email, by}` | `{ok:true}` / `400 bad_email` / `409 not_disabled` — 탈퇴(soft delete)한 계정을 active로 되살린다 |
+| `GET /api/console/members` | 인증 | — | `{items:[{email, disabledAt, purgeAfter, caseId, due}]}` — 탈퇴(soft delete)한 회원. `due`면 유예가 지나 완전 삭제할 수 있다 |
+| `POST /api/console/members/restore` | 관리자 | `{email, by}` | `{ok:true}` / `400 bad_email` / `409 not_disabled` — 유예 기간 안에 active로 되살린다 |
+| `POST /api/console/members/purge` | 관리자 | `{email, by}` | `{ok:true}` / `400 bad_email` / `409 not_disabled` / `409 not_due` — 유예가 지난 회원을 완전 삭제한다(주소는 되돌릴 수 없는 키로 바뀜). 유예 시각이 없는 행도 `not_due` |
 | `GET /api/console/policy/:ch` | 인증 | — | `{pack, raw, version, live, invalid, error?, shippedVersion, rules, problems, promotion:{intents, channel}, kbKeys}` |
 | `POST /api/console/policy/:ch/check` | 인증 | `{pack}` | `{problems, warnings, diff:[{path, from, to, rule}], gate:{live, next, widenings, pass, blocked, channelCritical}}` |
 | `POST /api/console/policy/:ch/publish` | 관리자 | `{pack, baseVersion, note}` | `{version, changeId, warnings}` / `409 l2_not_eligible {blocked, channelCritical, widenings}` / `422 actions_readonly` |

@@ -175,9 +175,9 @@ function chat({ agent, ctx, messages = [], tools = [] }) {
   if (has('get_customer_record') && !called('get_customer_record') && COMPANY_RE.test(body)) return use('get_customer_record', {});
   if (has('lookup_order') && !called('lookup_order') && ORDER_RE.test(body)) return use('lookup_order', {});
   if (has('lookup_billing') && !called('lookup_billing') && BILLING_RE.test(body)) return use('lookup_billing', {});
-  const del = has('delete_account') && !called('delete_account') ? body.match(DELETE_REQ_RE) : null;
-  if (del) return use('delete_account', { customerQuote: del[0].trim() });
-  if (has('lookup_account') && !called('lookup_account') && (ACCOUNT_RE.test(body) || called('delete_account'))) return use('lookup_account', {});
+  const del = has('request_account_deletion') && !called('request_account_deletion') ? body.match(DELETE_REQ_RE) : null;
+  if (del) return use('request_account_deletion', { customerQuote: del[0].trim() });
+  if (has('lookup_account') && !called('lookup_account') && ACCOUNT_RE.test(body)) return use('lookup_account', {});
   if (has('find_meeting_slots') && !called('find_meeting_slots') && MEETING_RE.test(body)) return use('find_meeting_slots', {});
   const d = respond(ctx);
   if (d.needsHandoff && d.handoffReason === 'out_of_knowledge') {

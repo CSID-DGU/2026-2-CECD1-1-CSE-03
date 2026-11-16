@@ -36,7 +36,7 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `TOOL_ROUTER` (없음) | `server/agents/router.js` `server/index.js` | `decision`이면 답장 Agent 첫 걸음(읽을 절·부를 조회·탈퇴 판정)을 결정 모델이 고르고 코드가 실행한다. 실패·확신 낮음이면 원래 ReAct. 다른 값·키 없음은 시작 거부 |
 | `DECISION_PAID_TIER` (없음) | `server/index.js` | `NODE_ENV=production`에서 `TOOL_ROUTER=decision`을 켜려면 `1`(유료 등급 키라는 확인). 없으면 시작 거부 |
 | `DECISION_TIMEOUT_MS` (`3000`) | `server/llm/decision.js` | 결정 모델 호출 제한 시간. 넘으면 라우터 없이 진행 |
-| `ACCOUNT_DELETE_TOOL` (없음) | `server/agents/tools/account.js` `server/index.js` | `1`이면 답장 Agent에 계정 탈퇴(soft delete) 툴을 연다. 회원 원본(`BUSINESS_DATA_FILE`)·고객 본인 발신 인증·탈퇴 분류·메일 속 요청 문장이 모두 맞을 때만 실행. 복구는 `POST /api/console/members/restore`(관리자) |
+| `ACCOUNT_DELETE_TOOL` (없음) | `server/agents/tools/account.js` `server/index.js` | `1`이면 답장 Agent에 탈퇴 요청 툴을 연다. 툴은 계정을 끄지 않고 회원 원본(`BUSINESS_DATA_FILE`)에 등록된 주소로 확인 코드를 보낸다. 고객이 코드로 회신하면 코드가 끄고(soft delete), 30일 뒤 관리자가 완전 삭제를 승인한다. 확인 코드 메일은 사람 승인 없이 나가므로 `MAIL_ALLOWED_DOMAINS`에 고객 도메인이 있어야 한다 |
 | `ANTHROPIC_BASE_URL` (`https://api.anthropic.com/v1/messages`) | `server/llm/anthropic.js` | Messages 엔드포인트. `fetch` 직접 호출, `anthropic-version: 2026-10-21`, JSON 은 `output_config.format: json_schema` |
 | `LLM_TIMEOUT_MS` (30000) | `server/llm/anthropic.js` | LLM 호출 하나의 제한 시간(`AbortSignal.timeout`) |
 | `RESPONDER_MODE` (react) | `server/agents/responder.js` | 답장 Agent 방식. 기본 `react`는 툴(지식베이스 찾기·읽기, 고객 이력, 주문·결제 조회, 초안 검사·제출, 사람에게 넘김)을 모델이 골라 부른다(목록은 `docs/tools.md`). `single`이면 한 번 묻고 JSON을 받는다 |

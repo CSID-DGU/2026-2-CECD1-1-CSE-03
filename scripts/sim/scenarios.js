@@ -33,7 +33,7 @@ const ABBR = { support: 'sup', onboarding: 'onb', sales: 'sal' };
 const OUTCOMES = ['auto', 'approve', 'handoff', 'ignore'];
 // expect.tools에 쓸 수 있는 이름(server/agents/tools/의 툴). 툴을 더하면 여기도 더한다 — test/sim-scenarios.test.js가 맞춰 본다
 const TOOL_NAMES = ['search_knowledge_base', 'read_knowledge_base', 'report_knowledge_gap', 'search_past_cases', 'get_customer_record', 'lookup_order',
-  'lookup_billing', 'lookup_account', 'delete_account', 'find_meeting_slots', 'read_official_page', 'check_draft', 'submit_draft', 'request_handoff'];
+  'lookup_billing', 'lookup_account', 'request_account_deletion', 'find_meeting_slots', 'read_official_page', 'check_draft', 'submit_draft', 'request_handoff'];
 const ORIGINS = ['seed', 'adapted', 'handwritten'];
 const ID_RE = /^(sup|onb|sal)-[a-z0-9_]+-[a-z]-\d{2}$/;
 const FAMILY_RE = /^(sup|onb|sal)-[a-z0-9_]+-[a-z]$/;

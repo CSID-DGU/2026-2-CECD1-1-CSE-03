@@ -65,6 +65,7 @@ const ACTIVITY_LABEL = {
   close: '종결', note: '메모', human_reply: '직접 답장', hold: '보류', unhold: '보류 해제', handoff: '사람에게 넘김',
   shadow_rating: '섀도 평가', auto_close: '자동 종결', send_unconfirmed: '발송 확인 필요', resolve_sending: '발송 확인 처리',
   auto_send: '자동 발송(L2)', auto_send_failed: '자동 발송 막힘', auto_ack: '접수 안내 자동 발송', purge: '원문 파기',
+  deletion_code_sent: '탈퇴 확인 코드 발송', deletion_confirmed: '탈퇴 본인 확인 — 계정 비활성화', deletion_unconfirmed: '탈퇴 확인 코드 불일치·만료',
 };
 const SENDER_AUTH = { fail: ['발신자 인증 실패', 'warn'], form: ['폼에 적힌 주소', ''] };
 // 상세의 명령 버튼. 펼치는 입력 칸이 있는 것(compose)과 바로 보내는 것.
@@ -843,7 +844,7 @@ const URGENCY = { low: '낮음', normal: '보통', high: '높음' };
 const TOOL_LABEL = {
   search_knowledge_base: '지식베이스 찾기', read_knowledge_base: '지식베이스 읽기', report_knowledge_gap: '지식베이스 빈 곳 남기기',
   search_past_cases: '지난 케이스 조회', get_customer_record: '고객 기록 조회', lookup_order: '주문 조회', lookup_billing: '결제·구독 조회', lookup_account: '계정 상태 조회',
-  find_meeting_slots: '담당자 빈 시간 조회', delete_account: '계정 탈퇴 처리',
+  find_meeting_slots: '담당자 빈 시간 조회', request_account_deletion: '탈퇴 확인 코드 보냄',
   read_official_page: '공식 사이트 읽기', check_draft: '초안 검사', submit_draft: '초안 제출', request_handoff: '사람에게 넘김',
 };
 const decisionOut = (x) => {
@@ -879,9 +880,9 @@ function toolLogSections(decisions) {
 }
 function toolLogSection(o) {
   const gaps = Array.isArray(o.knowledgeGaps) ? o.knowledgeGaps : [];
-  const disabled = Array.isArray(o.actions) && o.actions.some((a) => a && a.type === 'account_disabled');
+  const disabled = Array.isArray(o.actions) && o.actions.some((a) => a && a.type === 'deletion_code_sent');
   return h('details', { class: 'card toollog', ...(disabled ? { open: '' } : {}) },
-    h('summary', { class: 'card-title' }, '답장 Agent 툴 기록', h('span', { class: 'chip', text: `총 ${o.steps ?? o.trace.length}걸음` }), disabled ? h('span', { class: 'chip warn', text: '계정 탈퇴 처리함' }) : null, o.stepCap ? h('span', { class: 'chip warn', text: '걸음 상한 도달' }) : null),
+    h('summary', { class: 'card-title' }, '답장 Agent 툴 기록', h('span', { class: 'chip', text: `총 ${o.steps ?? o.trace.length}걸음` }), disabled ? h('span', { class: 'chip warn', text: '탈퇴 확인 코드 보냄' }) : null, o.stepCap ? h('span', { class: 'chip warn', text: '걸음 상한 도달' }) : null),
     h('ol', { class: 'toollog-steps' }, o.trace.map((st, i) => h('li', {},
       h('div', { class: 'toollog-head' }, h('b', { text: `${st.step ?? i + 1}걸음` }), st.llmMs != null ? h('span', { class: 'muted', text: `모델 ${st.llmMs}ms` }) : null),
       (st.calls || []).length
