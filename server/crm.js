@@ -239,7 +239,7 @@ function listView(docs, q = {}) {
 }
 
 // 상세 화면의 에이전트 기록 — 판단 기록 전체가 아니라 접수 Agent 감정 신호와 답장 Agent 툴 기록만 골라 낸다(본문·입력 요약·버전은 싣지 않는다).
-const AGENT_LOG_KEYS = { triage: ['sentiment', 'urgency', 'threat', 'customerWants'], respond: ['mode', 'steps', 'trace', 'stepCap', 'knowledgeGaps'] };
+const AGENT_LOG_KEYS = { triage: ['sentiment', 'urgency', 'threat', 'customerWants'], respond: ['mode', 'steps', 'trace', 'stepCap', 'knowledgeGaps', 'actions'] };
 function agentLog(rows = []) {
   return rows.filter((d) => AGENT_LOG_KEYS[d.step]).map((d) => {
     let o = d.output;

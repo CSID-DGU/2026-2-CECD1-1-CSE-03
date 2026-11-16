@@ -842,7 +842,8 @@ const MOOD = { 1: '차분', 2: '약간 불편', 3: '불만', 4: '화남', 5: '�
 const URGENCY = { low: '낮음', normal: '보통', high: '높음' };
 const TOOL_LABEL = {
   search_knowledge_base: '지식베이스 찾기', read_knowledge_base: '지식베이스 읽기', report_knowledge_gap: '지식베이스 빈 곳 남기기',
-  search_past_cases: '지난 케이스 조회', get_customer_record: '고객 기록 조회', lookup_order: '주문 조회', lookup_billing: '결제·구독 조회',
+  search_past_cases: '지난 케이스 조회', get_customer_record: '고객 기록 조회', lookup_order: '주문 조회', lookup_billing: '결제·구독 조회', lookup_account: '계정 상태 조회',
+  find_meeting_slots: '담당자 빈 시간 조회', delete_account: '계정 탈퇴 처리',
   read_official_page: '공식 사이트 읽기', check_draft: '초안 검사', submit_draft: '초안 제출', request_handoff: '사람에게 넘김',
 };
 const decisionOut = (x) => {
@@ -878,8 +879,9 @@ function toolLogSections(decisions) {
 }
 function toolLogSection(o) {
   const gaps = Array.isArray(o.knowledgeGaps) ? o.knowledgeGaps : [];
-  return h('details', { class: 'card toollog' },
-    h('summary', { class: 'card-title' }, '답장 Agent 툴 기록', h('span', { class: 'chip', text: `총 ${o.steps ?? o.trace.length}걸음` }), o.stepCap ? h('span', { class: 'chip warn', text: '걸음 상한 도달' }) : null),
+  const disabled = Array.isArray(o.actions) && o.actions.some((a) => a && a.type === 'account_disabled');
+  return h('details', { class: 'card toollog', ...(disabled ? { open: '' } : {}) },
+    h('summary', { class: 'card-title' }, '답장 Agent 툴 기록', h('span', { class: 'chip', text: `총 ${o.steps ?? o.trace.length}걸음` }), disabled ? h('span', { class: 'chip warn', text: '계정 탈퇴 처리함' }) : null, o.stepCap ? h('span', { class: 'chip warn', text: '걸음 상한 도달' }) : null),
     h('ol', { class: 'toollog-steps' }, o.trace.map((st, i) => h('li', {},
       h('div', { class: 'toollog-head' }, h('b', { text: `${st.step ?? i + 1}걸음` }), st.llmMs != null ? h('span', { class: 'muted', text: `모델 ${st.llmMs}ms` }) : null),
       (st.calls || []).length

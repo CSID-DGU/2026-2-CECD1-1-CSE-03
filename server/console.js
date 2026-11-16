@@ -780,6 +780,14 @@ const routes = [
   ['POST', /^\/api\/console\/policy\/([^/]+)\/reset$/, (m, _q, b, ctx) => policyWrite(m[1], 'reset', b, adminOf(b), ctx), W],
   ['GET', /^\/api\/console\/history$/, (_m, q) => history(q)],
   ['GET', /^\/api\/console\/history\/([^/]+)$/, (m) => historyItem(m[1])],
+  // 탈퇴(soft delete) 복구 — 관리자만. 에이전트가 끈 계정을 되살린다
+  ['POST', /^\/api\/console\/members\/restore$/, (_m, _q, b) => {
+    const a = adminOf(b);
+    if (typeof b.email !== 'string' || !b.email.trim()) fail(400, 'bad_email');
+    const r = require('./members').restore(b.email, { by: a });
+    if (!r.ok) fail(409, r.error);
+    return { ok: true };
+  }, W],
 ];
 
 module.exports = {

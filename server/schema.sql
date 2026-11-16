@@ -199,3 +199,11 @@ CREATE TABLE IF NOT EXISTS kb_drafts (               -- KB 초안(직접 편집�
   error TEXT,
   created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS members (             -- 고객사 서비스 회원(시험용 저장소). 실제 연동은 server/members.js 어댑터만 바꾼다
+  email TEXT PRIMARY KEY,                         -- crm.contactKey(소문자)
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled')),
+  disabled_at TEXT, deleted_at TEXT,              -- 탈퇴는 soft delete: 행을 지우지 않고 비활성화·삭제 표시 시각만 적는다
+  deleted_by TEXT, delete_case_id TEXT,           -- 누가(agent:responder·agent:router·사람) 어느 케이스에서
+  restored_at TEXT, restored_by TEXT,
+  updated_at TEXT NOT NULL
+);

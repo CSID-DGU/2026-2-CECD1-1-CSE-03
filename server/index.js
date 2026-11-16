@@ -102,6 +102,11 @@ function preflight(env = process.env) {
     if (env[k] && !/^[1-9]\d*$/.test(env[k])) errors.push(`${k}=${env[k]} — 비우거나 1 이상의 정수.`);
   }
   // 접수 Agent RAG(KB_MODE=rag). 임베딩은 mock | bedrock-cohere, 저장소는 memory | pgvector(PGVECTOR_URL). 접속 확인은 기동 뒤 미리 색인이 한다(여기서는 형식만)
+  // 결정 모델 툴 라우터·탈퇴 툴. 무료 등급 결정 모델은 입력을 제품 개선에 쓸 수 있어 운영(production)에서는 유료 등급 확인(DECISION_PAID_TIER=1)이 있어야 켠다
+  if (env.TOOL_ROUTER && !['decision'].includes(env.TOOL_ROUTER)) errors.push(`TOOL_ROUTER=${env.TOOL_ROUTER} — 비우거나 decision.`);
+  if (env.TOOL_ROUTER === 'decision' && !env.GEMINI_API_KEY) errors.push('TOOL_ROUTER=decision인데 GEMINI_API_KEY가 비어 있다.');
+  if (prod && env.TOOL_ROUTER === 'decision' && env.DECISION_PAID_TIER !== '1') errors.push('NODE_ENV=production에서 TOOL_ROUTER=decision은 유료 등급 키만 쓴다(무료 등급은 입력을 제품 개선에 쓴다). 유료 등급이면 DECISION_PAID_TIER=1.');
+  if (env.ACCOUNT_DELETE_TOOL && !['0', '1'].includes(env.ACCOUNT_DELETE_TOOL)) errors.push(`ACCOUNT_DELETE_TOOL=${env.ACCOUNT_DELETE_TOOL} — 비우거나 0 | 1.`);
   if (env.KB_MODE && !['full', 'rag'].includes(env.KB_MODE)) errors.push(`KB_MODE=${env.KB_MODE} — 비우거나 full | rag.`);
   if (env.KB_TOPK && !(/^[1-9]\d*$/.test(env.KB_TOPK) && Number(env.KB_TOPK) <= kbIndex.TOPK_MAX)) errors.push(`KB_TOPK=${env.KB_TOPK} — 비우거나 1~${kbIndex.TOPK_MAX} 정수.`);
   if (env.KB_TRIAGE_TOC && !['0', '1'].includes(env.KB_TRIAGE_TOC)) errors.push(`KB_TRIAGE_TOC=${env.KB_TRIAGE_TOC} — 비우거나 0 | 1.`);

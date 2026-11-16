@@ -32,7 +32,11 @@ npm run sim -- --every=5 --url=http://localhost:3000 --once   # 간격 · 대상
 | `ANTHROPIC_API_KEY` | `server/llm/anthropic.js` | Claude API 키. `npm run smoke:llm` 은 없으면 거부 |
 | `ANTHROPIC_MODEL` (`claude-sonnet-5-5`) | `server/llm/anthropic.js` | 모델 id |
 | `ANTHROPIC_MODEL_TRIAGE` · `_RESPONDER` · `_REVIEWER` · `_BRIEFER` (없음) | `server/llm/anthropic.js` | 그 에이전트만 다른 모델로. 비우면 `ANTHROPIC_MODEL`. 평가 실행기는 준 값을 `meta.models.agentBy`에 남기고 비교표가 다른 조건으로 적는다 |
-| `GEMINI_API_KEY` (없음) | `scripts/decision-compare.js` | 결정 모델 비교 실험만 쓴다. 서버는 읽지 않는다. 무료 등급은 입력을 제품 개선에 쓸 수 있으니 합성 평가 세트만 보낸다. [decision-model.md](decision-model.md) |
+| `GEMINI_API_KEY` (없음) | `scripts/decision-compare.js` `server/llm/decision.js` | 결정 모델 키. 비교 실험과 `TOOL_ROUTER=decision`이 쓴다. 무료 등급은 입력을 제품 개선에 쓸 수 있으니 합성 데이터만 보낸다. [decision-model.md](decision-model.md) |
+| `TOOL_ROUTER` (없음) | `server/agents/router.js` `server/index.js` | `decision`이면 답장 Agent 첫 걸음(읽을 절·부를 조회·탈퇴 판정)을 결정 모델이 고르고 코드가 실행한다. 실패·확신 낮음이면 원래 ReAct. 다른 값·키 없음은 시작 거부 |
+| `DECISION_PAID_TIER` (없음) | `server/index.js` | `NODE_ENV=production`에서 `TOOL_ROUTER=decision`을 켜려면 `1`(유료 등급 키라는 확인). 없으면 시작 거부 |
+| `DECISION_TIMEOUT_MS` (`3000`) | `server/llm/decision.js` | 결정 모델 호출 제한 시간. 넘으면 라우터 없이 진행 |
+| `ACCOUNT_DELETE_TOOL` (없음) | `server/agents/tools/account.js` `server/index.js` | `1`이면 답장 Agent에 계정 탈퇴(soft delete) 툴을 연다. 회원 원본(`BUSINESS_DATA_FILE`)·고객 본인 발신 인증·탈퇴 분류·메일 속 요청 문장이 모두 맞을 때만 실행. 복구는 `POST /api/console/members/restore`(관리자) |
 | `ANTHROPIC_BASE_URL` (`https://api.anthropic.com/v1/messages`) | `server/llm/anthropic.js` | Messages 엔드포인트. `fetch` 직접 호출, `anthropic-version: 2026-10-21`, JSON 은 `output_config.format: json_schema` |
 | `LLM_TIMEOUT_MS` (30000) | `server/llm/anthropic.js` | LLM 호출 하나의 제한 시간(`AbortSignal.timeout`) |
 | `RESPONDER_MODE` (react) | `server/agents/responder.js` | 답장 Agent 방식. 기본 `react`는 툴(지식베이스 찾기·읽기, 고객 이력, 주문·결제 조회, 초안 검사·제출, 사람에게 넘김)을 모델이 골라 부른다(목록은 `docs/tools.md`). `single`이면 한 번 묻고 JSON을 받는다 |

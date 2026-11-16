@@ -70,13 +70,31 @@
 
 | 툴 | 하는 일 | 언제 쓰나 | 노출 조건 |
 |---|---|---|---|
-| `lookup_account()` | 이 고객의 계정 상태(active·locked·suspended·pending_deletion·closed), 역할, 로그인 잠김과 이유, 2단계 인증, 회사 SSO 여부, 탈퇴 신청 진행 단계 | 로그인이 안 될 때, 계정이 잠겼을 때, 탈퇴가 진행 중인지 물을 때 | `BUSINESS_DATA_FILE` + 고객 본인 발신 + 인증 pass |
+| `lookup_account()` | 이 고객의 계정 상태(active·locked·suspended·pending_deletion·closed, 탈퇴 처리된 계정은 disabled), 역할, 로그인 잠김과 이유, 2단계 인증, 회사 SSO 여부, 탈퇴 신청 진행 단계 | 로그인이 안 될 때, 계정이 잠겼을 때, 탈퇴가 진행 중인지 물을 때 | `BUSINESS_DATA_FILE` + 고객 본인 발신 + 인증 pass |
+| `delete_account(customerQuote)` | 이 고객 본인의 계정을 탈퇴 처리한다(soft delete: 행을 지우지 않고 disabled로 바꾸고 누가·어느 케이스에서 껐는지 남긴다). 날짜는 돌려주지 않는다 | 고객이 이 메일에서 자기 계정 탈퇴를 지금 해 달라고 분명히 요청할 때. 방법·조건만 물으면 쓰지 않는다 | `ACCOUNT_DELETE_TOOL=1` + `BUSINESS_DATA_FILE` + 고객 본인 발신 + 인증 pass + 접수 Agent 분류가 `account_deletion` |
 | `find_meeting_slots()` | 온보딩 담당자가 미팅할 수 있는 빈 시간 후보 3개(날짜, 요일 한 글자, 시작 시각, 한국 시간) | 고객이 미팅 가능한 시간을 묻거나 일정을 잡으려 할 때 | `BUSINESS_DATA_FILE`에 `meeting`이 있고 채널 팩이 날짜 언급을 허용할 때(`guard.allowDates`, 지금은 온보딩). 고객 정보가 없어 인증과 무관 |
 
-- 계정 툴은 날짜·금액·연락처를 돌려주지 않는다. 잠김 이유·탈퇴 단계는 정해진 값(`failed_attempts`·`admin_lock`·`security`, `requested`·`processing`)만 내보내고 그 밖은 `unknown`이다. 탈퇴가 끝나는 날짜 같은 값을 답장에 옮기면 기한 약속이 되기 때문이다. 잠금 해제·탈퇴 처리·권한 변경은 툴로 열지 않는다.
+- 계정 툴은 날짜·금액·연락처를 돌려주지 않는다. 잠김 이유·탈퇴 단계는 정해진 값(`failed_attempts`·`admin_lock`·`security`, `requested`·`processing`)만 내보내고 그 밖은 `unknown`이다. 탈퇴가 끝나는 날짜 같은 값을 답장에 옮기면 기한 약속이 되기 때문이다. 잠금 해제·탈퇴 처리·권한 변경은 조회 툴이 하지 않는다.
 - 일정 툴은 예약하지 않는다. 답장에는 "가능한 후보"로 적고, 고객이 고르면 담당자가 확정한다고 다른 문장으로 쓴다. 날짜와 같은 문장에 약속 말(드리겠습니다·연락·회신·예정)이 붙으면 검사기가 기한 약속으로 막는다. 요일도 "목요일"이 아니라 "(목)"처럼 한 글자로 쓴다. "목요일"은 검사기가 날짜 말로 본다.
 - 일정 형식: `meeting: {timezone, weekdays: [0=일 … 6=토], times: ["HH:MM"], minLeadHours, busy: ["YYYY-MM-DDTHH:MM"]}`. 오늘부터 21일 안에서 최소 간격(`minLeadHours`)이 지난 시간만 고르고 `busy`는 뺀다. 형식이 틀린 시간은 버리고, `timezone`이 `Asia/Seoul`이 아니면 툴을 숨긴다. 고객사 캘린더 연동 때는 `business.js`의 `load()`가 빈 시간을 이 형식으로 돌려주면 된다.
 - 계정 형식: `accounts: [{email, status, role, login: {locked, reason}, twoFactor, sso, deletion: {stage} | null}]`.
+- **탈퇴 툴(쓰기).** 이 프로젝트에서 고객 상태를 바꾸는 유일한 툴이라 다른 툴보다 조건이 많다.
+  - 켜는 값 `ACCOUNT_DELETE_TOOL=1`이 없으면 정의 자체가 없다.
+  - 고객 본인 발신에 인증 pass, 접수 Agent 분류가 `account_deletion`일 때만 보인다.
+  - `customerQuote`가 메일 본문에 그대로(공백 무시) 있어야 하고 탈퇴·삭제 말이 들어 있어야 실행한다. 모델이 지어낸 요청으로 계정을 끄지 않게 하려는 것이다.
+  - 회원 원본에 없는 주소, 이미 closed인 계정은 끄지 않는다. 이미 끈 계정은 다시 쓰지 않고 `already`만 돌려준다.
+  - 저장은 `server/members.js`(회원 저장소 어댑터, 지금은 SQLite `members` 테이블)다. 실제 고객사 회원 DB로 바꿀 때는 이 파일만 바꾼다.
+  - 처리 사실은 판정 기록 respond 출력의 `actions`에 남고, 상세 화면 툴 기록에 「계정 탈퇴 처리함」으로 보인다. 담당자는 `POST /api/console/members/restore`(관리자)로 되살린다.
+  - 검수 Agent는 이 툴을 다시 돌리지 않는다(쓰기라서). 답장에 처리 결과를 쓰려면 다음 걸음에서 `lookup_account`로 확인하고 그 조회를 근거로 단다.
+
+### 결정 모델 툴 라우터 — `server/agents/router.js` (`TOOL_ROUTER=decision`)
+
+- 답장 Agent의 첫 걸음은 대개 "어느 절을 읽고 어느 조회를 부를지" 고르는 것이다. 이 고르기만 결정 모델(Gemini Decision) 한 번으로 바꾼다. 본문은 그대로 답장 Agent(LLM)가 쓴다.
+- 결정 모델에 묻는 것: 조회 툴 하나(또는 none), 지식베이스 절 하나(또는 none), 탈퇴 툴이 열린 사이클이면 "지금 탈퇴를 분명히 요청하는가".
+- 코드가 실행하는 조건: 조회·절은 확신도 0.6 이상(틀려도 답장 Agent가 다음 걸음에서 더 읽는다). 탈퇴는 0.9 이상이고, 처리한 뒤 계정 조회를 붙인다.
+- 실행 결과는 tool_use·tool_result 한 쌍으로 대화 앞에 붙는다. 근거 검사(읽은 절·부른 조회)는 같은 runner 상태를 쓴다. 툴 기록에는 0걸음(라우터)으로 남고 걸음 수·걸음 상한에는 세지 않는다.
+- 결정 모델이 실패하거나 시간을 넘기면(기본 3초) 아무것도 붙이지 않고 원래 ReAct로 간다.
+- 무료 등급 키는 입력을 제품 개선에 쓸 수 있다. 운영에서는 `DECISION_PAID_TIER=1`이 없으면 시작하지 않는다. 지금 실험은 합성 데이터만 쓴다.
 
 ### 공식 사이트 — `web.js`
 
@@ -103,6 +121,7 @@
 
 - **감정·긴급도·위협 신호:** 접수 Agent가 분류할 때 함께 내는 출력값이다. 고를 행동이 아니라서 툴로 만들지 않는다.
 - **발송·승인·정책 판정:** 코드 게이트와 사람의 몫이다. 모델이 고를 수 없다.
+- **잠금 해제·권한 변경·환불:** 쓰기 툴은 계정 탈퇴 하나만 열었다. 나머지는 사람이 한다.
 - **업종별 툴:** 업종이 정해지지 않아 지금은 범용으로 만들었다. 업종이 정해지면 같은 규칙으로 추가한다.
 
 ## 작성 규칙

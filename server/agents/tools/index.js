@@ -4,12 +4,13 @@
 //   customer.js   지난 케이스·고객 기록(고객 본인 + 인증 pass일 때만)
 //   orders.js     주문 조회 ┐ 원본 business.js(BUSINESS_DATA_FILE — 목 데이터 또는 고객사 시스템)
 //   billing.js    결제·구독 조회 ┤ 파일이 있고 고객 본인 + 인증 pass일 때만
-//   account.js    계정 상태 조회 ┘
+//   account.js    계정 상태 조회 ┘ + 탈퇴 처리(soft delete, ACCOUNT_DELETE_TOOL=1일 때만 — members.js)
 //   meeting.js    담당자 빈 시간 후보(같은 원본, 날짜를 허용하는 채널에서만 — 고객 정보 없음)
 //   web.js        고객사 공식 사이트 페이지 읽기(OFFICIAL_SITE_DOMAINS가 있을 때만, 맥락용)
 //   draft.js      초안 검사·제출·사람에게 넘김
 // 설계 규칙:
-//   - 발송·승인·정책 판정은 툴로 열지 않는다(코드 게이트에 남는다). 환불·해지·결제 취소도 열지 않는다. 쓰기는 매뉴얼 보강 목록 하나뿐이고 판정 기록에 남는다.
+//   - 발송·승인·정책 판정은 툴로 열지 않는다(코드 게이트에 남는다). 환불·해지·결제 취소도 열지 않는다.
+//     쓰기는 매뉴얼 보강 목록과 계정 탈퇴(soft delete) 둘이다. 탈퇴는 켜는 값·고객 본인·탈퇴 분류·메일 속 요청 문장이 모두 맞을 때만 실행되고 판정 기록(actions)에 남는다.
 //   - 고객 범위는 케이스로 고정한다. 모델이 이메일·케이스 id·주문번호를 인자로 넣지 못한다.
 //   - 지금 쓸 수 없는 툴은 목록에서 뺀다. 목록 밖 호출은 실행하지 않는다.
 //   - 결과는 짧게: 건수·글자 수 상한, 고객 유래 텍스트는 maskPii.
@@ -27,7 +28,7 @@ const defs = (ctx) => GROUPS.flatMap((g) => g.defs(ctx));
  * run(name, input) → {(동기 툴) 또는 그 Promise(네트워크 툴)  content: string, isError: boolean, done?: result } — done이 있으면 루프가 끝난다.
  */
 function runner(ctx) {
-  const state = { read: new Set(), called: new Set(), lastPassed: null, drafted: false, gaps: [], pages: 0 };
+  const state = { read: new Set(), called: new Set(), lastPassed: null, drafted: false, gaps: [], pages: 0, actions: [] };
   const exposed = new Set(defs(ctx).map((d) => d.name));
   const handlers = Object.assign({}, ...GROUPS.map((g) => g.handlers(ctx, state)));
   return {

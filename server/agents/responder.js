@@ -5,6 +5,7 @@
 const db = require('../db');
 const { persona, factsBlock, historyBlock, decisionsBlock, promptSource, call, chat } = require('./common');
 const tools = require('./tools');
+const router = require('./router');
 
 // 이미 보낸 답과 이 이상 비슷하면 같은 답으로 본다(공백·문장부호를 뺀 글자 2-gram Dice). 같은 KB 절을 고쳐 쓴 정도까지 잡는다.
 const REPEAT_MIN = 0.85;
@@ -131,8 +132,11 @@ async function runReact(ctx) {
   const messages = [{ role: 'user', content: userReact(ctx) }];
   const trace = [];
   const t0 = Date.now();
+  // TOOL_ROUTER=decision: 첫 걸음(읽을 절·부를 조회·탈퇴 판정)을 결정 모델이 고르고 코드가 실행해 대화에 붙인다
+  const routed = await router.route(ctx, tr, defs);
+  if (routed) { trace.push(routed.entry); messages.push(...routed.messages); }
   let promptVersion = null; let done = null;
-  for (let step = 1; step <= maxSteps() && !done; step += 1) {
+  for (let step = 1; step <= maxSteps() && !done; step += 1) { // 라우터 걸음(step 0)은 걸음 상한에 세지 않는다
     const r = await chat({ agent: 'responder', system: sys, messages, tools: defs, ctx, source: SOURCE_REACT, maxTokens: 8192 }); // thinking + 긴 submit_draft 본문
     promptVersion = r.promptVersion;
     const content = r.result.content || [];
@@ -161,7 +165,8 @@ async function runReact(ctx) {
   // latencyMs = 사이클 전체 벽시계(LLM + 툴). 걸음별 LLM 시간은 trace.llmMs.
   // knowledgeGaps = 지식베이스에 없던 질문(운영 리포트의 매뉴얼 보강 목록이 판정 기록에서 읽는다)
   const gaps = tr.state.gaps.length ? { knowledgeGaps: tr.state.gaps } : {};
-  return { result: { ...normalize(done), mode: 'react', steps: trace.length, trace, ...gaps, ...(stepCap ? { stepCap } : {}) }, latencyMs: Date.now() - t0, promptVersion };
+  const acts = tr.state.actions.length ? { actions: tr.state.actions } : {}; // 툴이 실제로 바꾼 것(계정 탈퇴) — 판정 기록에 남아 담당자가 본다
+  return { result: { ...normalize(done), mode: 'react', steps: trace.filter((e) => !e.router).length, trace, ...gaps, ...acts, ...(stepCap ? { stepCap } : {}) }, latencyMs: Date.now() - t0, promptVersion };
 }
 
 async function single(ctx) {
