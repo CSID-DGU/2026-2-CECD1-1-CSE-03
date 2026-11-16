@@ -16,6 +16,8 @@ const triageAgent = require('./agents/triage');
 const responder = require('./agents/responder');
 const reviewer = require('./agents/reviewer');
 const briefer = require('./agents/briefer');
+const deletion = require('./deletion');
+const members = require('./members');
 
 const { HttpError } = cases;
 // 리스: 한 케이스에 회차는 하나만. 프로세스가 죽으면 recover()가 시작할 때 전부 푼다.
@@ -184,6 +186,13 @@ async function cycle(caseId, messageId) {
   db.saveVersion(kb.version, `kb:${c.channel}:ko`, kb.text);
   savePolicyVersion(c.channel, pack);
   const versions = { kb: kb.version, policy: pack.version };
+  // ⓪ 탈퇴 확인 코드 회신 — 모델 없이 코드가 맞춘다(코드가 걸린 주소·발신 인증 pass·6자리). 사람이 맡은 케이스여도 맞춘다
+  // 인용을 뺀 본문만 본다 — 빈 회신이면 body_clean이 원문(인용된 코드 포함)으로 돌아가 고객이 코드를 적지 않아도 맞아 버린다
+  const dc = deletion.matchReply({
+    sender: msg.sender, senderAuth: msg.sender_auth, body: cases.stripQuotes(msg.body), subject: msg.subject, autoSubmitted: !!msg.auto_submitted, caseId,
+    firstInCase: db.get("SELECT COUNT(*) n FROM messages WHERE case_id=? AND direction='in'", caseId).n === 1,
+  });
+  if (dc) return confirmDeletion(c, msg, dc, versions);
   if (c.responder === 'human') {
     // 넘김 뒤 고객 재문의 — 자동 회신·알림 없음. 목록에 "고객 재문의"로만 보인다.
     record(caseId, messageId, 'gate1', 'code', { responder: 'human' }, { action: 'IGNORE', reason: 'responder_human', inputSummary: summary, versions });
@@ -464,6 +473,53 @@ async function sendAck(x, reason) {
       onFail: (err) => { db.run("UPDATE drafts SET status='DISCARDED', error=? WHERE id=?", err, id); events.emit('draft.updated', { caseId, draftId: id, status: 'DISCARDED' }); },
     });
   } catch (e) { if (!(e instanceof HttpError)) console.error('[loop] ack', e); /* 발송 실패는 onFail이 기록했다 — 사람 전담 케이스라 담당자가 답한다 */ }
+}
+
+/** 코드가 쓴 고정 안내 메일(탈퇴 확인 결과) — 사람 승인 없이 접수 안내와 같은 발송 경로로 보낸다. 답 회차로 세지 않는다. */
+async function sendNotice(c, messageId, body, activityType) {
+  try {
+    const rendered = mail.renderAgent({ name: c.customer_name, body, auto: true });
+    const id = db.uuid(); const now = db.now();
+    db.insert('drafts', {
+      id, case_id: c.id, trigger_message_id: messageId, status: 'SENDING', intent: null, action: 'ACK', original_body: body,
+      used_facts: '[]', idempotency_key: `ack:${id}`, approved_by: AUTO_BY, approved_at: now, created_at: now,
+    });
+    events.emit('draft.created', { caseId: c.id, draftId: id, status: 'SENDING' });
+    await deliver(db.get('SELECT * FROM drafts WHERE id=?', id), c, {
+      body, rendered, by: AUTO_BY, sentBy: 'ack', edited: false, activityType,
+      onFail: (err) => { db.run("UPDATE drafts SET status='DISCARDED', error=? WHERE id=?", err, id); events.emit('draft.updated', { caseId: c.id, draftId: id, status: 'DISCARDED' }); },
+    });
+  } catch (e) { if (!(e instanceof HttpError)) console.error('[loop] notice', e); /* 발송 실패는 onFail이 기록했다 — 담당자가 답한다 */ }
+}
+
+/**
+ * 탈퇴 확인 코드 회신을 맞춘다. 맞으면 계정을 끄고(soft delete) 결과 안내를 보내고 케이스를 닫는다.
+ * 틀리면 남은 횟수를, 만료면 다시 요청하라고 안내한다. 5번 틀리면 코드를 지우고 사람에게 넘긴다.
+ * 판정 기록에는 코드도 본문 요약도 남기지 않는다.
+ */
+async function confirmDeletion(c, msg, dc, versions) {
+  const r = members.confirm(dc.email, dc.code);
+  const reason = r.ok ? 'deletion_confirmed' : `deletion_${r.error}`;
+  record(c.id, msg.id, 'prefilter', 'code', { deletion: r.ok ? 'confirmed' : r.error }, { action: 'IGNORE', reason, versions });
+  activity(c.id, r.ok ? 'deletion_confirmed' : 'deletion_unconfirmed', 'system', { result: r.ok ? 'confirmed' : r.error });
+  clearRetry(c.id);
+  record(c.id, msg.id, 'execute', 'code', { action: 'IGNORE', reason }, { action: 'IGNORE', reason, versions });
+  await sendNotice(c, msg.id, deletion.notice(r), r.ok ? 'deletion_confirmed' : 'deletion_unconfirmed');
+  if (r.ok) {
+    cases.setState(c.id, 'CLOSED', { closed_at: db.now() });
+    activity(c.id, 'auto_close', 'system', { reason: 'account_deleted' });
+    // 코드 메일에 회신하면 새 케이스가 된다 — 탈퇴를 요청한 케이스에도 남기고 닫는다(대기 초안은 고르지 않은 것으로)
+    const orig = r.caseId && r.caseId !== c.id ? db.get('SELECT state FROM cases WHERE id=?', r.caseId) : null;
+    if (orig) {
+      activity(r.caseId, 'deletion_confirmed', 'system', { result: 'confirmed', confirmCaseId: c.id });
+      if (orig.state !== 'CLOSED') { try { closeCase(r.caseId, { by: 'system' }); } catch { /* 발송 중이면 담당자가 닫는다 */ } }
+    }
+  } else if (r.error === 'locked' && c.responder !== 'human') {
+    cases.setResponder(c.id, 'human', { by: 'agent', reason: 'human_request' });
+    db.run("UPDATE loops SET state='HANDED_OFF', updated_at=? WHERE case_id=?", db.now(), c.id);
+    cases.setState(c.id, 'HANDED_OFF');
+  } else if (db.get('SELECT state FROM cases WHERE id=?', c.id).state === 'AGENT_ACTIVE') cases.setState(c.id, cases.restingState(c.id));
+  return { action: 'IGNORE', reason };
 }
 
 /**

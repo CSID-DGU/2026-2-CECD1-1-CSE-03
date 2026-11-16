@@ -154,6 +154,8 @@ const COMPANY_RE = /저희\s*회사|우리\s*회사|저희\s*팀|회사\s*계정
 const ORDER_RE = /주문|배송|택배|order|shipping/i;
 const BILLING_RE = /결제|환불|구독|요금|청구|자동결제|billing|refund|charge|subscription/i;
 const ACCOUNT_RE = /계정|로그인|잠겼|잠김|잠금|탈퇴|권한|account|log ?in|locked/i;
+// 지금 탈퇴해 달라는 요청 문장(방법을 묻는 말은 아니다)
+const DELETE_REQ_RE = /[^.!?\n]*(탈퇴|계정\s*삭제)[^.!?\n]*(해\s*주세요|해\s*줘|처리해|진행해\s*주|부탁드립니다|부탁해요)[^.!?\n]*/;
 const MEETING_RE = /미팅|일정|가능한\s*시간|빈\s*시간|meeting|schedule/i;
 function chat({ agent, ctx, messages = [], tools = [] }) {
   if (agent !== 'responder') throw new Error(`mock chat: 알 수 없는 agent ${agent}`);
@@ -173,6 +175,8 @@ function chat({ agent, ctx, messages = [], tools = [] }) {
   if (has('get_customer_record') && !called('get_customer_record') && COMPANY_RE.test(body)) return use('get_customer_record', {});
   if (has('lookup_order') && !called('lookup_order') && ORDER_RE.test(body)) return use('lookup_order', {});
   if (has('lookup_billing') && !called('lookup_billing') && BILLING_RE.test(body)) return use('lookup_billing', {});
+  const del = has('request_account_deletion') && !called('request_account_deletion') ? body.match(DELETE_REQ_RE) : null;
+  if (del) return use('request_account_deletion', { customerQuote: del[0].trim() });
   if (has('lookup_account') && !called('lookup_account') && ACCOUNT_RE.test(body)) return use('lookup_account', {});
   if (has('find_meeting_slots') && !called('find_meeting_slots') && MEETING_RE.test(body)) return use('find_meeting_slots', {});
   const d = respond(ctx);
