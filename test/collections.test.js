@@ -708,7 +708,7 @@ test('I16 CRM API — 목록 필터·counts·subCounts·400, 상세 actions·트
       r = await get(base, `/api/crm/cases/${a.caseId}`);
       assert.equal(r.status, 200);
       assert.deepEqual(Object.keys(r.body).sort(), ['actions', 'agentLog', 'case', 'company', 'contact', 'pendingDraft', 'relatedCases', 'revision', 'sendingDraft', 'shadowDraft', 'timeline']);
-      for (const e of r.body.agentLog) assert.ok(Object.keys(e.output).every((k) => ['sentiment', 'urgency', 'threat', 'customerWants', 'mode', 'steps', 'trace', 'stepCap', 'knowledgeGaps'].includes(k)), JSON.stringify(e));
+      for (const e of r.body.agentLog) assert.ok(Object.keys(e.output).every((k) => ['sentiment', 'urgency', 'threat', 'customerWants', 'mode', 'steps', 'trace', 'stepCap', 'knowledgeGaps', 'actions'].includes(k)), JSON.stringify(e));
       assert.deepEqual(r.body.actions, ['approve', 'edit_approve', 'discard', 'takeover', 'note', 'close']);
       assert.equal(r.body.pendingDraft.id, pending(a.caseId).id); assert.match(r.body.pendingDraft.preview, /영수증/);
       assert.ok(!/prompt_hash|promptHash|"decisions"|"loop"|lease_token/.test(JSON.stringify(r.body)));

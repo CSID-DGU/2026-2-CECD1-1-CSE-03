@@ -25,7 +25,7 @@ const STATE_ACTS = ['takeover', 'return', 'close', 'hold', 'unhold', 'auto_close
 const LABEL = {
   inbound: '고객 메일', agent_reply: '에이전트 답장', ack: '접수 안내', human_reply: '담당자 직접 답장', approve: '초안 승인', edit_approve: '초안 수정 후 승인',
   discard: '초안 폐기', takeover: '담당자 인수', return: '에이전트에게 반환', close: '종결', hold: '보류', unhold: '보류 해제', note: '메모', handoff: '사람에게 넘김',
-  auto_close: '자동 종결', auto_send: '자동 발송', auto_ack: '접수 안내 자동 발송', auto_send_failed: '자동 발송 실패', send_unconfirmed: '발송 확인 필요',
+  auto_close: '자동 종결', auto_send: '자동 발송', auto_ack: '접수 안내 자동 발송', deletion_code_sent: '탈퇴 확인 코드 발송', deletion_confirmed: '탈퇴 본인 확인 — 계정 비활성화', deletion_unconfirmed: '탈퇴 확인 코드 불일치·만료', auto_send_failed: '자동 발송 실패', send_unconfirmed: '발송 확인 필요',
   resolve_sending: '발송 확인 처리', shadow_rating: '섀도 초안 평가', purge: '원문 파기', reopen: '재오픈',
 };
 const INTAKE = { type: 'system', id: 'intake' };
@@ -239,7 +239,7 @@ function listView(docs, q = {}) {
 }
 
 // 상세 화면의 에이전트 기록 — 판단 기록 전체가 아니라 접수 Agent 감정 신호와 답장 Agent 툴 기록만 골라 낸다(본문·입력 요약·버전은 싣지 않는다).
-const AGENT_LOG_KEYS = { triage: ['sentiment', 'urgency', 'threat', 'customerWants'], respond: ['mode', 'steps', 'trace', 'stepCap', 'knowledgeGaps'] };
+const AGENT_LOG_KEYS = { triage: ['sentiment', 'urgency', 'threat', 'customerWants'], respond: ['mode', 'steps', 'trace', 'stepCap', 'knowledgeGaps', 'actions'] };
 function agentLog(rows = []) {
   return rows.filter((d) => AGENT_LOG_KEYS[d.step]).map((d) => {
     let o = d.output;

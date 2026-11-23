@@ -20,13 +20,13 @@ const collections = require('../server/collections');
 const retention = require('../server/retention');
 const { createServer } = require('../server/index');
 
-const NEW_TABLES = ['config_changes', 'kb_drafts'];
+const NEW_TABLES = ['config_changes', 'kb_drafts', 'members'];
 const EXPECTED = {
   master: [
     'activities', 'activities_case', 'case_threads', 'cases', 'cases_email', 'cases_state', 'claims', 'config_changes', 'config_changes_target',
     'decisions', 'decisions_case', 'dispatches', 'doc_activity_case', 'doc_company_domain', 'doc_contact_email', 'doc_event_case', 'doc_event_dedupe',
     'documents', 'drafts', 'drafts_case', 'drafts_status', 'handoffs', 'kb_drafts', 'llm_calls', 'llm_calls_case', 'llm_calls_created', 'loops',
-    'messages', 'messages_case', 'versions',
+    'members', 'messages', 'messages_case', 'versions',
   ],
   tables: {
     activities: [
@@ -246,7 +246,7 @@ function shape() {
   return { master: names("'table','index'"), tables, docs };
 }
 
-test('기존 테이블 열·CRM 문서 키 경로·sqlite_master 이름이 BASE 리터럴과 같다(새 테이블은 config_changes·kb_drafts뿐)', async (t) => {
+test('기존 테이블 열·CRM 문서 키 경로·sqlite_master 이름이 BASE 리터럴과 같다(새 테이블은 config_changes·kb_drafts·members뿐)', async (t) => {
   t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-02T00:00:00.000Z') });
   db.init(':memory:'); // MIGRATIONS까지 돈다
   const server = createServer();

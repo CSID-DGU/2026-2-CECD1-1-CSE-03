@@ -199,3 +199,15 @@ CREATE TABLE IF NOT EXISTS kb_drafts (               -- KB 초안(직접 편집�
   error TEXT,
   created_by TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS members (             -- 고객사 서비스 회원(시험용 저장소). 실제 연동은 server/members.js 어댑터만 바꾼다
+  email TEXT PRIMARY KEY,                         -- crm.contactKey(소문자). 완전 삭제 뒤에는 'purged:<임의 id>'로 바뀐다(주소를 되돌릴 수 없게)
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled','purged')),
+  confirm_hash TEXT, confirm_expires_at TEXT,     -- 탈퇴 확인 코드 — 코드 원문은 저장하지 않는다(주소와 묶은 해시만)
+  confirm_tries INTEGER NOT NULL DEFAULT 0, confirm_case_id TEXT,
+  disabled_at TEXT, deleted_at TEXT,              -- 확인되면 soft delete: 행을 지우지 않고 비활성화·삭제 표시 시각만 적는다
+  deleted_by TEXT, delete_case_id TEXT,           -- 누가(customer:confirm_code) 어느 케이스에서
+  purge_after TEXT,                               -- 이 시각 뒤에 관리자가 승인하면 완전 삭제(유예 기간 동안은 복구 가능)
+  purged_at TEXT, purged_by TEXT,
+  restored_at TEXT, restored_by TEXT,
+  updated_at TEXT NOT NULL
+);
