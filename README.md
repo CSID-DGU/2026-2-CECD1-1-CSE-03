@@ -55,6 +55,28 @@ node --no-warnings=ExperimentalWarning scripts/subject-request.js export <email>
 | 지식베이스 · 정책 고치기 | 상단 「지식·정책」 — 편집은 `ADMIN_USERS`에 적은 사람만. 매뉴얼 파일을 지식베이스 초안으로 바꾸는 「매뉴얼 변환」 포함 |
 | 운영 숫자 보기 | 상단 「리포트」 — 업무 대체 비율, LLM 호출 · 토큰 · 비용 |
 
+### 웹 화면 띄우기 (`frontend/`)
+
+피그마 「바톤 - AI 상담 코파일럿」 기준 React 화면이다. 백엔드와 별도로 띄우며, 터미널 두 개가 필요하다.
+
+```bash
+# 터미널 1 — 백엔드 (저장소 루트)
+npm start                      # http://127.0.0.1:3000
+npm run sim                    # (선택) 합성 문의를 넣어 목록을 채운다
+
+# 터미널 2 — 웹 화면
+cd frontend
+npm install                    # 처음 한 번
+npm run dev                    # http://localhost:5173
+```
+
+- 개발 서버가 `/api` 요청을 `127.0.0.1:3000`으로 넘긴다(`frontend/vite.config.ts`). 백엔드가 꺼져 있으면 목록이 비고 오류 안내가 뜬다.
+- `http://localhost:5173`을 열면 로그인 화면(`/X-100`)이 나온다. 아직 검증 없이 이메일과 역할(상담원 · 관리자)만 고르면 들어간다. 이메일 앞부분이 승인 · 인수 기록의 이름으로 남는다.
+- 지식 · 정책 게시 같은 관리자 쓰기는 백엔드의 `ADMIN_USERS`에 그 이름이 있어야 한다. 예: `ADMIN_USERS=admin npm start` 후 `admin@acme.com`으로 로그인.
+- 화면 주소는 피그마 화면 번호를 따른다. 상담원 `/A-100`, 관리자 `/M-100`, 설정 `/S-110`, 리포트 `/R-100`, 고객 문의 `/C-100`, 도움말 `/C-300`.
+- 고객 화면은 문의 접수(`/C-100` → `POST /api/inbound`)만 서버에 연결된다. 서버에 없는 기능은 화면에 「기능 구현 필요」로 표시돼 있다.
+- 배포용 빌드는 `npm run build` → `frontend/dist/`.
+
 ## 폴더 구조
 
 | 경로 | 무엇 |
@@ -65,6 +87,7 @@ node --no-warnings=ExperimentalWarning scripts/subject-request.js export <email>
 | `server/mail/` | 발송 어댑터 — `mock.js` · `smtp.js` |
 | `server/mock/` | 합성 문의 세트 `inquiries.js`, 주문·결제 조회 툴 시험용 가상 데이터 `business-data.json`, `npm run demo` · `npm run sim` 본체 |
 | `web/` | 백오피스 화면 (바닐라 HTML · CSS · JS, 빌드 없음). `app.js`는 목록 · 칸반 · 상세 · 리포트, `console.js`는 지식·정책 콘솔 |
+| `frontend/` | 피그마 기준 웹 화면 (Vite + React + TS). 고객 `pages/c` · 상담원 `pages/a` · 관리자 `pages/m` · 공통 로그인 `pages/x`, API 호출 `lib/api.ts` |
 | `policy/` | 채널 정책 팩 — `support.json` · `onboarding.json` · `sales.json` |
 | `kb/` | 채널 지식베이스 — `support.md` · `support.en.md` · `onboarding.md` · `sales.md`. 가상 회사 "ACME" 기준 예시 내용([`docs/data.md`](docs/data.md)) |
 | `scripts/` | 서버 밖에서 도는 도구. 수신 어댑터 `inbound-imap.js`(IMAP, 미러 모드) · `inbound-ses.js`(SES → S3 → SQS), 메일 왕복 데모 `demo-mail.js`, 실데이터 평가 `eval-real.js`, 감사 내보내기 `audit-export.js`, 정보주체 요청 `subject-request.js`, 검사 도구 CLI `engine.js`(플러그인과 같이 씀), 단일 HTML 프로토타입 빌드 `build-prototype.js` |
