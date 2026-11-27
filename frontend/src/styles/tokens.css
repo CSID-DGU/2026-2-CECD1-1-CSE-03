@@ -1,0 +1,61 @@
+/* BATON 디자인 시스템 토큰 — Figma "Design Library › BATON Design System" 변수 그대로. */
+:root {
+  /* Primary = AI · 브랜드 */
+  --primary-50: #f6f6ff;
+  --primary-100: #efefff;
+  --primary-200: #d4d3ff;
+  --primary-300: #aaa9ff;
+  --primary-400: #716ef8;
+  --primary-500: #5f5ce8;
+  --primary-600: #4b48c9;
+
+  /* Secondary = 사람 · 연결 */
+  --secondary-50: #f7fbff;
+  --secondary-100: #e2f1ff;
+  --secondary-150: #d0e8ff;
+  --secondary-300: #86bdff;
+  --secondary-500: #5da7ff;
+
+  --gray-0: #ffffff;
+  --gray-100: #f6f7f8;
+  --gray-200: #eff1f3;
+  --gray-400: #c3c9d0;
+  --gray-500: #8490a0;
+  --gray-700: #4e5868;
+  --gray-800: #333d4b;
+  --gray-900: #191f28;
+
+  /* 상태색은 대기 · 위험 · 완료에만 */
+  --status-wait: #ffc233;
+  --status-risk: #ff6565;
+  --status-ok: #24cd5d;
+  --status-risk-ring: #ff656522;
+  --overlay-dim: #191f287a;
+
+  --text-primary: var(--gray-900);
+  --text-secondary: var(--gray-800);
+  --text-tertiary: var(--gray-700);
+  --text-hint: var(--gray-500);
+  --text-disabled: var(--gray-400);
+  --text-brand: var(--primary-500);
+  --bg-page: var(--gray-100);
+  --bg-surface: var(--gray-0);
+  --bg-subtle: var(--gray-200);
+  --border-default: var(--gray-200);
+  --border-hover: var(--gray-500);
+  --border-focus: var(--primary-500);
+
+  --shadow-card: 0 12px 40px #191f2814;
+  --shadow-modal: 0 24px 64px #191f2847;
+  --shadow-toast: 0 8px 24px #191f2833;
+  --shadow-segment: 0 1px 3px #191f281f;
+  --focus-primary: 0 0 0 3px #d4d3ff;
+  --focus-error: 0 0 0 3px #ff656522;
+  --glow-wait: 0 0 15px #ffc2334f, 0 0 3px #ffc2336b;
+  --glow-risk: 0 0 15px #ff656540, 0 0 3px #ff65656b;
+  --glow-human: 0 0 15px #5da7ff33;
+  --glow-ok: 0 0 15px #24cd5d30;
+
+  --font-sans: 'Pretendard', 'Noto Sans KR', system-ui, -apple-system, 'Malgun Gothic', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+}
